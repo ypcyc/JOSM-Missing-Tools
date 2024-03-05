@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -44,6 +45,7 @@ import org.openstreetmap.josm.gui.MapFrame;
 import org.openstreetmap.josm.gui.Notification;
 import org.openstreetmap.josm.gui.dialogs.relation.DownloadRelationTask;
 import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
+import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.CopyList;
 import org.openstreetmap.josm.tools.Geometry;
 import org.openstreetmap.josm.tools.Logging;
@@ -105,6 +107,8 @@ public class MagicCutterAction extends JosmAction {
                         Set<Way> newIntersectedWays2 = new HashSet<>();
                         Logging.info("Try to create intersection");
                         // allWays relation.getMemberPrimitives(Way.class)
+
+                        // Find ways of relation intersecting with new Way
                         NodeWayUtils.addWaysIntersectingWays(relation.getMemberPrimitives(Way.class),
                                 Collections.singletonList(finalWayForFirst), newIntersectedWays2);
 
@@ -116,19 +120,64 @@ public class MagicCutterAction extends JosmAction {
                         wayList.addAll(newIntersectedWays2);
                         wayList.add(finalWayForFirst);
 
-                      
-
                         for (Way way : wayList) {
                             Logging.info("Intersected way id: " + way.getId());
                             ds.addSelected(way);
                         }
 
                         Logging.info("Selected ways " + wayList.size());
+
+                        // Create Nodes at intersections
                         Set<Node> intersectionNodes = createIntersection(wayList);
+                        List<Node> intersectionNodes2 = new ArrayList<>();
+                        intersectionNodes2.addAll(intersectionNodes);
 
-                        //Split way
-                        doSplitWayShowSegmentSelection(finalWayForFirst, intersectionNodes);
+                        // Split way
+                        // doSplitWayShowSegmentSelection(finalWayForFirst, intersectionNodes2);
+                        List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(finalWayForFirst,
+                                intersectionNodes2);
+                        Logging.info("Waychunks count: " + wayChunks.size());
 
+                        // Collection<? extends OsmPrimitive> resultWays = Collections.emptyList();
+                        SplitWayCommand result = SplitWayCommand.splitWay(finalWayForFirst,
+                                wayChunks, Collections.emptyList());
+                        List<Command> cmds = new LinkedList<>();
+                        cmds.add(result);
+
+                        // Logging.info("Results " + resultWays.size());
+                        // Now we have splitted ways
+                        // Try to Split multipolygon
+                        if (!cmds.isEmpty()) {
+                            UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
+                                    cmds));
+
+                            getLayerManager().getEditDataSet().setSelected(result.getNewSelection());
+
+                        }
+
+                        Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
+                        // relation
+                        for (Iterator<OsmPrimitive> iterator = results.iterator(); iterator.hasNext();) {
+                            OsmPrimitive element = iterator.next();
+
+                            if (element instanceof Way) {
+
+                                Way wayElement = (Way) element;
+
+                                Logging.info("Relation to split: " + relation.getId());
+                                Logging.info("Way for split: " + wayElement.getId());
+                                
+                                try {
+                                    //SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                                    SplitObjectAction.splitMultipolygonAtWayChecked(relation, wayElement, true);
+                                } catch (IllegalArgumentException err) {
+                                    Logging.info("Caught IllegalArgumentException: " + err.getMessage());
+                                }
+                                
+
+                            }
+
+                        }
 
                         break;
                     }
@@ -146,42 +195,46 @@ public class MagicCutterAction extends JosmAction {
         }
     }
 
-    public static void doSplitWayShowSegmentSelection(Way splitWay, List<Node> splitNodes, List<OsmPrimitive> selection) {
-        final List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(splitWay, splitNodes);
-        if (wayChunks != null) {
-            final List<Way> newWays = SplitWayCommand.createNewWaysFromChunks(splitWay, wayChunks);
-            final Way wayToKeep = SplitWayCommand.Strategy.keepLongestChunk().determineWayToKeep(newWays);
+    // public static void doSplitWayShowSegmentSelection(Way splitWay, List<Node>
+    // splitNodes, List<OsmPrimitive> selection) {
+    // final List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(splitWay,
+    // splitNodes);
+    // if (wayChunks != null) {
+    // final List<Way> newWays = SplitWayCommand.createNewWaysFromChunks(splitWay,
+    // wayChunks);
+    // final Way wayToKeep =
+    // SplitWayCommand.Strategy.keepLongestChunk().determineWayToKeep(newWays);
 
-            
-            if (wayToKeep != null) {
-                doSplitWay(splitWay, wayToKeep, newWays, selection);
-            }
-        }
-    }
+    // if (wayToKeep != null) {
+    // doSplitWay(splitWay, wayToKeep, newWays, selection);
+    // }
+    // }
+    // }
 
-       static void doSplitWay(Way way, Way wayToKeep, List<Way> newWays, List<OsmPrimitive> newSelection) {
-        final MapFrame map = MainApplication.getMap();
-        final boolean isMapModeDraw = map != null && map.mapMode == map.mapModeDraw;
+    // static void doSplitWay(Way way, Way wayToKeep, List<Way> newWays,
+    // List<OsmPrimitive> newSelection) {
+    // final MapFrame map = MainApplication.getMap();
+    // final boolean isMapModeDraw = map != null && map.mapMode == map.mapModeDraw;
 
-        Optional<SplitWayCommand> splitWayCommand = SplitWayCommand.doSplitWay(
-                way,
-                wayToKeep,
-                newWays,
-                !isMapModeDraw ? newSelection : null,
-                SplitWayCommand.WhenRelationOrderUncertain.ASK_USER_FOR_CONSENT_TO_DOWNLOAD
-        );
+    // Optional<SplitWayCommand> splitWayCommand = SplitWayCommand.doSplitWay(
+    // way,
+    // wayToKeep,
+    // newWays,
+    // !isMapModeDraw ? newSelection : null,
+    // SplitWayCommand.WhenRelationOrderUncertain.ASK_USER_FOR_CONSENT_TO_DOWNLOAD
+    // );
 
-        splitWayCommand.ifPresent(result -> {
-            UndoRedoHandler.getInstance().add(result);
-            List<? extends PrimitiveId> newSel = result.getNewSelection();
-            if (!Utils.isEmpty(newSel)) {
-                way.getDataSet().setSelected(newSel);
-            }
-        });
-        if (!splitWayCommand.isPresent()) {
-            newWays.forEach(w -> w.setNodes(null)); // see 19885
-        }
-    }
+    // splitWayCommand.ifPresent(result -> {
+    // UndoRedoHandler.getInstance().add(result);
+    // List<? extends PrimitiveId> newSel = result.getNewSelection();
+    // if (!Utils.isEmpty(newSel)) {
+    // way.getDataSet().setSelected(newSel);
+    // }
+    // });
+    // if (!splitWayCommand.isPresent()) {
+    // newWays.forEach(w -> w.setNodes(null)); // see 19885
+    // }
+    // }
 
     private Set<Node> createIntersection(List<Way> ways) {
 
@@ -200,7 +253,7 @@ public class MagicCutterAction extends JosmAction {
                             nodes.add((Node) p);
                     }
                     if (!nodes.isEmpty()) {
-                        
+
                         getLayerManager().getEditDataSet().setSelected(nodes);
                     }
                 }
@@ -255,7 +308,7 @@ public class MagicCutterAction extends JosmAction {
                     Way foundWay = checkWayAndTryToFollow(newMergedWay, direction, relation, attempt);
                     if (foundWay != null) {
                         Logging.info("Returning merged way, on attempt " + attempt);
-                        //break;
+                        // break;
                         return foundWay;
                     }
                 }
@@ -269,7 +322,7 @@ public class MagicCutterAction extends JosmAction {
 
         Logging.info("return offsetWay added to dataset: " + offsetWay.getId());
         return offsetWay;
-        
+
     }
 
     private Node getEndingNode(Way way, String direction) {
@@ -303,16 +356,23 @@ public class MagicCutterAction extends JosmAction {
         // Create a new way with the combined nodes
         Way mergedWay = new Way();
 
+        // Use a set to keep track of unique nodes
+        Set<Node> uniqueNodes = new HashSet<>();
+
         for (Node node : way2.getNodes()) {
-            mergedWay.addNode(node);
+            if (uniqueNodes.add(node)) {
+                mergedWay.addNode(node);
+            }
         }
 
         for (Node node : way1.getNodes()) {
-            mergedWay.addNode(node);
+            if (uniqueNodes.add(node)) {
+                mergedWay.addNode(node);
+            }
         }
 
         // Copy tags and other attributes as needed
-        //mergedWay.setKeys(way1.getKeys());
+        // mergedWay.setKeys(way1.getKeys());
 
         return mergedWay;
     }
@@ -380,8 +440,9 @@ public class MagicCutterAction extends JosmAction {
         // Create a new way with the offset nodes
         Way offsetWay = new Way();
 
-        tags.put("road", "" + attempt);
-        tags.put("note", "offset");
+        // Split way should not contain tags
+        // tags.put("road", "" + attempt);
+        // tags.put("note", "offset");
         offsetWay.setKeys(tags);
         offsetWay.setNodes(offsetNodes);
 

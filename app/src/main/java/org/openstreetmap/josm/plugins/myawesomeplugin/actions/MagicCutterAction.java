@@ -18,14 +18,17 @@ import javax.swing.JOptionPane;
 
 import org.openstreetmap.josm.actions.ExpertToggleAction;
 import org.openstreetmap.josm.actions.JosmAction;
+import org.openstreetmap.josm.actions.downloadtasks.PostDownloadHandler;
 import org.openstreetmap.josm.command.AddCommand;
 import org.openstreetmap.josm.command.Command;
+import org.openstreetmap.josm.command.DeleteCommand;
 import org.openstreetmap.josm.command.SequenceCommand;
 import org.openstreetmap.josm.command.SplitWayCommand;
 import org.openstreetmap.josm.data.UndoRedoHandler;
 import org.openstreetmap.josm.data.coor.EastNorth;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.osm.DataSet;
+import org.openstreetmap.josm.data.osm.DefaultNameFormatter;
 import org.openstreetmap.josm.data.osm.OsmPrimitive;
 import org.openstreetmap.josm.data.osm.PrimitiveId;
 import org.openstreetmap.josm.data.osm.Relation;
@@ -44,6 +47,7 @@ import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.MapFrame;
 import org.openstreetmap.josm.gui.Notification;
 import org.openstreetmap.josm.gui.dialogs.relation.DownloadRelationTask;
+import org.openstreetmap.josm.gui.util.GuiHelper;
 import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
 import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.CopyList;
@@ -54,6 +58,9 @@ import org.openstreetmap.josm.data.osm.Node;
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 /**
  * Extends current selection by selecting nodes on all touched ways
@@ -88,101 +95,36 @@ public class MagicCutterAction extends JosmAction {
                 // check relation type
                 if ("multipolygon".equals(relation.get("type"))) {
 
-                    // Download Relation members
-                    MainApplication.worker.submit(
+                    // MainApplication.worker.submit(
+                    // new DownloadRelationTask(Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()));
+                    // ds.addSelected(relation);
+
+                    // CompletableFuture<Void> downloadCompletion = new CompletableFuture<>();
+
+                    // Submit the DownloadRelationTask to the worker
+                    Logging.info("Download Started " + relation.getIncompleteMembers().size());
+                    Future<?> task = MainApplication.worker.submit(
                             new DownloadRelationTask(Collections.singletonList(relation),
                                     MainApplication.getLayerManager().getEditLayer()));
-                    ds.addSelected(relation);
 
-                    Way sourceWay = null;
+                    // while (!task.isDone()) {
+                    // Logging.info("Calculating...");
+                    // // Thread.sleep(300);
+                    // }
 
-                    do {
-                        sourceWay = selectedWays.iterator().next();
-                        Logging.info("Working with way id: " + sourceWay.getId());
+                    MainApplication.worker.submit(() -> {
 
-                        Way finalWayForFirst = checkWayAndTryToFollow(sourceWay, "first", relation, 3);
-                        // Way finalWayForLast = checkWayAndTryToFollow(finalWayForFirst, "last",
-                        // relation, 3);
+                        try {
+                            task.get();
+                            Logging.info("Download completed!" + relation.getIncompleteMembers().size());
+                            processRelation(relation, selectedWays);
 
-                        Set<Way> newIntersectedWays2 = new HashSet<>();
-                        Logging.info("Try to create intersection");
-                        // allWays relation.getMemberPrimitives(Way.class)
-
-                        // Find ways of relation intersecting with new Way
-                        NodeWayUtils.addWaysIntersectingWays(relation.getMemberPrimitives(Way.class),
-                                Collections.singletonList(finalWayForFirst), newIntersectedWays2);
-
-                        for (Way way : relation.getMemberPrimitives(Way.class)) {
-                            Logging.info("Relation way id: " + way.getId());
+                        } catch (InterruptedException | ExecutionException e3) {
+                            Logging.error(e3);
                         }
 
-                        List<Way> wayList = new ArrayList<>();
-                        wayList.addAll(newIntersectedWays2);
-                        wayList.add(finalWayForFirst);
-
-                        for (Way way : wayList) {
-                            Logging.info("Intersected way id: " + way.getId());
-                            ds.addSelected(way);
-                        }
-
-                        Logging.info("Selected ways " + wayList.size());
-
-                        // Create Nodes at intersections
-                        Set<Node> intersectionNodes = createIntersection(wayList);
-                        List<Node> intersectionNodes2 = new ArrayList<>();
-                        intersectionNodes2.addAll(intersectionNodes);
-
-                        // Split way
-                        // doSplitWayShowSegmentSelection(finalWayForFirst, intersectionNodes2);
-                        List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(finalWayForFirst,
-                                intersectionNodes2);
-                        Logging.info("Waychunks count: " + wayChunks.size());
-
-                        // Collection<? extends OsmPrimitive> resultWays = Collections.emptyList();
-                        SplitWayCommand result = SplitWayCommand.splitWay(finalWayForFirst,
-                                wayChunks, Collections.emptyList());
-                        List<Command> cmds = new LinkedList<>();
-                        cmds.add(result);
-
-                        // Logging.info("Results " + resultWays.size());
-                        // Now we have splitted ways
-                        // Try to Split multipolygon
-                        if (!cmds.isEmpty()) {
-                            UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
-                                    cmds));
-
-                            getLayerManager().getEditDataSet().setSelected(result.getNewSelection());
-
-                        }
-
-                        Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
-                        // relation
-                        for (Iterator<OsmPrimitive> iterator = results.iterator(); iterator.hasNext();) {
-                            OsmPrimitive element = iterator.next();
-
-                            if (element instanceof Way) {
-
-                                Way wayElement = (Way) element;
-
-                                Logging.info("Relation to split: " + relation.getId());
-                                Logging.info("Way for split: " + wayElement.getId());
-                                
-                                try {
-                                    //SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
-                                    SplitObjectAction.splitMultipolygonAtWayChecked(relation, wayElement, true);
-                                } catch (IllegalArgumentException err) {
-                                    Logging.info("Caught IllegalArgumentException: " + err.getMessage());
-                                }
-                                
-
-                            }
-
-                        }
-
-                        break;
-                    }
-
-                    while (sourceWay != null);
+                    });
 
                 }
 
@@ -193,6 +135,129 @@ public class MagicCutterAction extends JosmAction {
                     tr("Please select some ways to find connected and intersecting ways!"))
                     .setIcon(JOptionPane.WARNING_MESSAGE).show();
         }
+    }
+
+    public void processRelation(Relation relation, Collection<Way> selectedWays) {
+
+        Way sourceWay = null;
+
+        do {
+            sourceWay = selectedWays.iterator().next();
+            Logging.info("Working with way id: " + sourceWay.getId());
+
+            Way finalWayForFirst = checkWayAndTryToFollow(sourceWay, "first", relation, 3);
+            // Way finalWayForLast = checkWayAndTryToFollow(finalWayForFirst, "last",
+            // relation, 3);
+
+            Set<Way> newIntersectedWays2 = new HashSet<>();
+            Logging.info("Try to create intersection");
+            // allWays relation.getMemberPrimitives(Way.class)
+
+            // Find ways of relation intersecting with new Way
+            NodeWayUtils.addWaysIntersectingWays(relation.getMemberPrimitives(Way.class),
+                    Collections.singletonList(finalWayForFirst), newIntersectedWays2);
+
+            for (Way way : relation.getMemberPrimitives(Way.class)) {
+                Logging.info("Relation way id: " + way.getId());
+            }
+
+            List<Way> wayList = new ArrayList<>();
+            wayList.addAll(newIntersectedWays2);
+            wayList.add(finalWayForFirst);
+
+            for (Way way : wayList) {
+                Logging.info("Intersected way id: " + way.getId());
+                ds.addSelected(way);
+            }
+
+            Logging.info("Selected ways " + wayList.size());
+
+            // Create Nodes at intersections
+            Set<Node> intersectionNodes = createIntersection(wayList);
+            List<Node> intersectionNodes2 = new ArrayList<>();
+            intersectionNodes2.addAll(intersectionNodes);
+
+            // Split way
+            // doSplitWayShowSegmentSelection(finalWayForFirst, intersectionNodes2);
+            List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(finalWayForFirst,
+                    intersectionNodes2);
+            Logging.info("Waychunks count: " + wayChunks.size());
+
+            // Collection<? extends OsmPrimitive> resultWays = Collections.emptyList();
+            SplitWayCommand result = SplitWayCommand.splitWay(finalWayForFirst,
+                    wayChunks, Collections.emptyList());
+            List<Command> cmds = new LinkedList<>();
+            cmds.add(result);
+
+            // Logging.info("Results " + resultWays.size());
+            // Now we have splitted ways
+            // Try to Split multipolygon
+            if (!cmds.isEmpty()) {
+                UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
+                        cmds));
+
+                getLayerManager().getEditDataSet().setSelected(result.getNewSelection());
+
+            }
+
+            Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
+            // relation
+
+            // List<Command> commands = new ArrayList<>();
+            Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
+
+            for (OsmPrimitive element : results) {
+                if (element instanceof Way) {
+
+                    Way wayElement = (Way) element;
+
+                    Logging.info("Relation to split: " + relation.getId());
+                    // long wayId = wayElement.getId();
+                    Logging.info("Way for split: " + wayElement.getUniqueId());
+
+                    try {
+                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                        Logging.info(
+                                "Relation incomplete members: " + relation.getIncompleteMembers().size());
+
+                        SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                    } catch (IllegalArgumentException err) {
+                        Logging.info("Caught IllegalArgumentException: " + err.getMessage());
+                        // delete way that was not used in split
+                        // SequenceCommand deleteCommand = new SequenceCommand("Delete Way",
+                        // wayElement);
+                        // commands.add(new DeleteCommand(wayElement));
+
+                        waysToDelete.add(wayElement);
+
+                    }
+
+                }
+
+            }
+
+            // delete unused ways
+            if (!waysToDelete.isEmpty()) {
+
+                // Collections.singleton(parameters.nearestSegment.getWay())
+                DeleteCommand.delete(waysToDelete, false, true);
+
+                // UndoRedoHandler
+                // .getInstance().add(new SequenceCommand(
+                // tr("Delete generated unused ways"),
+                // commands));
+            }
+
+            // for (Iterator<OsmPrimitive> iterator = results.iterator();
+            // iterator.hasNext();) {
+            // OsmPrimitive element = iterator.next();
+
+            // }
+
+            break;
+        }
+
+        while (sourceWay != null);
     }
 
     // public static void doSplitWayShowSegmentSelection(Way splitWay, List<Node>

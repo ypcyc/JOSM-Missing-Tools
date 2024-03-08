@@ -55,6 +55,7 @@ import org.openstreetmap.josm.tools.Geometry;
 import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
 import org.openstreetmap.josm.data.osm.Node;
+import org.openstreetmap.josm.tools.Pair;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -95,36 +96,30 @@ public class MagicCutterAction extends JosmAction {
                 // check relation type
                 if ("multipolygon".equals(relation.get("type"))) {
 
-                    // MainApplication.worker.submit(
-                    // new DownloadRelationTask(Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()));
-                    // ds.addSelected(relation);
+                    // Check if all memebers are downloaded
+                    if (relation.getIncompleteMembers().size() > 0) {
+                        // Submit the DownloadRelationTask to the worker
+                        Logging.info("Download Started " + relation.getIncompleteMembers().size());
+                        Future<?> task = MainApplication.worker.submit(
+                                new DownloadRelationTask(Collections.singletonList(relation),
+                                        MainApplication.getLayerManager().getEditLayer()));
 
-                    // CompletableFuture<Void> downloadCompletion = new CompletableFuture<>();
+                        MainApplication.worker.submit(() -> {
 
-                    // Submit the DownloadRelationTask to the worker
-                    Logging.info("Download Started " + relation.getIncompleteMembers().size());
-                    Future<?> task = MainApplication.worker.submit(
-                            new DownloadRelationTask(Collections.singletonList(relation),
-                                    MainApplication.getLayerManager().getEditLayer()));
+                            try {
+                                task.get();
+                                Logging.info("Download completed!" + relation.getIncompleteMembers().size());
+                                processRelation(relation, selectedWays);
 
-                    // while (!task.isDone()) {
-                    // Logging.info("Calculating...");
-                    // // Thread.sleep(300);
-                    // }
+                            } catch (InterruptedException | ExecutionException e3) {
+                                Logging.error(e3);
+                            }
 
-                    MainApplication.worker.submit(() -> {
+                        });
 
-                        try {
-                            task.get();
-                            Logging.info("Download completed!" + relation.getIncompleteMembers().size());
-                            processRelation(relation, selectedWays);
-
-                        } catch (InterruptedException | ExecutionException e3) {
-                            Logging.error(e3);
-                        }
-
-                    });
+                    } else {
+                        processRelation(relation, selectedWays);
+                    }
 
                 }
 
@@ -139,15 +134,21 @@ public class MagicCutterAction extends JosmAction {
 
     public void processRelation(Relation relation, Collection<Way> selectedWays) {
 
+        processWay(relation, selectedWays, "first", "positive");
+        processWay(relation, selectedWays, "last", "positive");
+        //processWay(relation, selectedWays, "first", "negative");
+        //processWay(relation, selectedWays, "last", "negative");
+
+    }
+
+    public void processWay(Relation relation, Collection<Way> selectedWays, String direction, String mode) {
         Way sourceWay = null;
 
         do {
             sourceWay = selectedWays.iterator().next();
-            Logging.info("Working with way id: " + sourceWay.getId());
+            Logging.info("Working with way id: " + sourceWay.getUniqueId());
 
-            Way finalWayForFirst = checkWayAndTryToFollow(sourceWay, "first", relation, 3);
-            // Way finalWayForLast = checkWayAndTryToFollow(finalWayForFirst, "last",
-            // relation, 3);
+            Way finalWayForFirst = checkWayAndTryToFollow(sourceWay, direction, relation, 3, mode);
 
             Set<Way> newIntersectedWays2 = new HashSet<>();
             Logging.info("Try to create intersection");
@@ -158,7 +159,7 @@ public class MagicCutterAction extends JosmAction {
                     Collections.singletonList(finalWayForFirst), newIntersectedWays2);
 
             for (Way way : relation.getMemberPrimitives(Way.class)) {
-                Logging.info("Relation way id: " + way.getId());
+                Logging.info("Relation way id: " + way.getUniqueId());
             }
 
             List<Way> wayList = new ArrayList<>();
@@ -166,7 +167,7 @@ public class MagicCutterAction extends JosmAction {
             wayList.add(finalWayForFirst);
 
             for (Way way : wayList) {
-                Logging.info("Intersected way id: " + way.getId());
+                Logging.info("Intersected way id: " + way.getUniqueId());
                 ds.addSelected(way);
             }
 
@@ -201,35 +202,24 @@ public class MagicCutterAction extends JosmAction {
             }
 
             Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
-            // relation
 
-            // List<Command> commands = new ArrayList<>();
             Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
 
             for (OsmPrimitive element : results) {
                 if (element instanceof Way) {
 
                     Way wayElement = (Way) element;
-
                     Logging.info("Relation to split: " + relation.getId());
-                    // long wayId = wayElement.getId();
                     Logging.info("Way for split: " + wayElement.getUniqueId());
 
                     try {
-                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
-                        Logging.info(
-                                "Relation incomplete members: " + relation.getIncompleteMembers().size());
+                        Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
+                        Pair<List<Relation>, List<Command>> Pairs= SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                        Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
 
-                        SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
                     } catch (IllegalArgumentException err) {
                         Logging.info("Caught IllegalArgumentException: " + err.getMessage());
-                        // delete way that was not used in split
-                        // SequenceCommand deleteCommand = new SequenceCommand("Delete Way",
-                        // wayElement);
-                        // commands.add(new DeleteCommand(wayElement));
-
                         waysToDelete.add(wayElement);
-
                     }
 
                 }
@@ -239,20 +229,10 @@ public class MagicCutterAction extends JosmAction {
             // delete unused ways
             if (!waysToDelete.isEmpty()) {
 
-                // Collections.singleton(parameters.nearestSegment.getWay())
-                DeleteCommand.delete(waysToDelete, false, true);
+                Command cmd = DeleteCommand.delete(waysToDelete, true, false);
+                UndoRedoHandler.getInstance().add(cmd);
 
-                // UndoRedoHandler
-                // .getInstance().add(new SequenceCommand(
-                // tr("Delete generated unused ways"),
-                // commands));
             }
-
-            // for (Iterator<OsmPrimitive> iterator = results.iterator();
-            // iterator.hasNext();) {
-            // OsmPrimitive element = iterator.next();
-
-            // }
 
             break;
         }
@@ -326,7 +306,7 @@ public class MagicCutterAction extends JosmAction {
         return Nodes;
     }
 
-    private Way checkWayAndTryToFollow(Way mergedWay, String direction, Relation relation, Integer attempt) {
+    private Way checkWayAndTryToFollow(Way mergedWay, String direction, Relation relation, Integer attempt, String mode) {
         if (attempt == null) {
             attempt = 5;
         }
@@ -337,7 +317,7 @@ public class MagicCutterAction extends JosmAction {
 
             Logging.info("Direction (" + direction + "), Attemt started: " + attempt);
 
-            offsetWay = getOffsetWay(mergedWay, attempt);
+            offsetWay = getOffsetWay(mergedWay, attempt, mode);
             Logging.info("offsetWay created");
             Command addOffsetWayCommand = createAddWayCommand(offsetWay);
             UndoRedoHandler.getInstance().add(addOffsetWayCommand);
@@ -370,7 +350,7 @@ public class MagicCutterAction extends JosmAction {
                     }
                     Logging.info("Direction (" + direction + "). Found connected way: " + nextConnectedWay.getId());
                     Way newMergedWay = mergeWays(mergedWay, nextConnectedWay);
-                    Way foundWay = checkWayAndTryToFollow(newMergedWay, direction, relation, attempt);
+                    Way foundWay = checkWayAndTryToFollow(newMergedWay, direction, relation, attempt, mode);
                     if (foundWay != null) {
                         Logging.info("Returning merged way, on attempt " + attempt);
                         // break;
@@ -475,10 +455,14 @@ public class MagicCutterAction extends JosmAction {
         return null; // No connected way with the same tags found
     }
 
-    public Way getOffsetWay(Way sourceWay, Integer attempt) {
+    public Way getOffsetWay(Way sourceWay, Integer attempt, String mode) {
 
         // Offset distance in meters
         double offsetDistance = 0.0001;
+
+        if (mode.equals("negative")) {
+            offsetDistance = offsetDistance * -1;
+        }
 
         List<Node> sourceNodes = sourceWay.getNodes();
         List<Node> offsetNodes = new ArrayList<>();

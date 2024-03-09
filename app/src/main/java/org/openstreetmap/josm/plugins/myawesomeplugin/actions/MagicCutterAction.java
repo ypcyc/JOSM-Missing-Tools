@@ -83,48 +83,10 @@ public class MagicCutterAction extends JosmAction {
     public void actionPerformed(ActionEvent e) {
         ds = getLayerManager().getActiveDataSet();
         Collection<Way> selectedWays = ds.getSelectedWays();
-        Collection<Way> allWays = ds.getWays();
 
         if (!selectedWays.isEmpty()) {
-            Set<Way> newIntersectedWays = new HashSet<>();
-            NodeWayUtils.addWaysIntersectingWays(allWays, selectedWays, newIntersectedWays);
-
-            // check for ways with relations
-            Set<Relation> parentRelations = OsmPrimitive.getParentRelations(newIntersectedWays);
-
-            for (Relation relation : parentRelations) {
-                // check relation type
-                if ("multipolygon".equals(relation.get("type"))) {
-
-                    // Check if all memebers are downloaded
-                    if (relation.getIncompleteMembers().size() > 0) {
-                        // Submit the DownloadRelationTask to the worker
-                        Logging.info("Download Started " + relation.getIncompleteMembers().size());
-                        Future<?> task = MainApplication.worker.submit(
-                                new DownloadRelationTask(Collections.singletonList(relation),
-                                        MainApplication.getLayerManager().getEditLayer()));
-
-                        MainApplication.worker.submit(() -> {
-
-                            try {
-                                task.get();
-                                Logging.info("Download completed!" + relation.getIncompleteMembers().size());
-                                processRelation(relation, selectedWays);
-
-                            } catch (InterruptedException | ExecutionException e3) {
-                                Logging.error(e3);
-                            }
-
-                        });
-
-                    } else {
-                        processRelation(relation, selectedWays);
-                    }
-
-                }
-
-            }
-
+            cutWithOffset(selectedWays, "positive");
+            cutWithOffset(selectedWays, "negative");
         } else {
             new Notification(
                     tr("Please select some ways to find connected and intersecting ways!"))
@@ -132,12 +94,56 @@ public class MagicCutterAction extends JosmAction {
         }
     }
 
-    public void processRelation(Relation relation, Collection<Way> selectedWays) {
+    public void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
 
-        processWay(relation, selectedWays, "first", "positive");
-        processWay(relation, selectedWays, "last", "positive");
-        //processWay(relation, selectedWays, "first", "negative");
-        //processWay(relation, selectedWays, "last", "negative");
+        Collection<Way> allWays = ds.getWays();
+        Set<Way> newIntersectedWays = new HashSet<>();
+        // Check ways that intersects with selected Way
+        NodeWayUtils.addWaysIntersectingWays(allWays, selectedWays, newIntersectedWays);
+
+        // Check if intersected Way is part of Relation
+        Set<Relation> parentRelations = OsmPrimitive.getParentRelations(newIntersectedWays);
+
+        for (Relation relation : parentRelations) {
+            // Check Relation type is Multipolygon
+            if ("multipolygon".equals(relation.get("type"))) {
+
+                // Check if all memebers are downloaded
+                if (relation.getIncompleteMembers().size() > 0) {
+                    // Submit the DownloadRelationTask to the worker
+                    Logging.info("Download Started " + relation.getIncompleteMembers().size());
+                    Future<?> task = MainApplication.worker.submit(
+                            new DownloadRelationTask(Collections.singletonList(relation),
+                                    MainApplication.getLayerManager().getEditLayer()));
+
+                    MainApplication.worker.submit(() -> {
+
+                        try {
+                            task.get();
+                            Logging.info("Download completed!" + relation.getIncompleteMembers().size());
+                            processRelation(relation, selectedWays, offsetMode);
+
+                        } catch (InterruptedException | ExecutionException e3) {
+                            Logging.error(e3);
+                        }
+
+                    });
+
+                } else {
+                    processRelation(relation, selectedWays, offsetMode);
+                }
+
+            }
+
+        }
+
+    }
+
+    public void processRelation(Relation relation, Collection<Way> selectedWays, String offsetMode) {
+
+        processWay(relation, selectedWays, "first", offsetMode);
+        processWay(relation, selectedWays, "last", offsetMode);
+
 
     }
 
@@ -214,7 +220,10 @@ public class MagicCutterAction extends JosmAction {
 
                     try {
                         Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
-                        Pair<List<Relation>, List<Command>> Pairs= SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                        // Pair<List<Relation>, List<Command>> Pairs =
+                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
+                        // List<Relation> newRelations = SplitObjectAction.splitMultipolygonAtWay(relation, wayElement,
+                        //         true).a;
                         Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
 
                     } catch (IllegalArgumentException err) {
@@ -306,7 +315,8 @@ public class MagicCutterAction extends JosmAction {
         return Nodes;
     }
 
-    private Way checkWayAndTryToFollow(Way mergedWay, String direction, Relation relation, Integer attempt, String mode) {
+    private Way checkWayAndTryToFollow(Way mergedWay, String direction, Relation relation, Integer attempt,
+            String mode) {
         if (attempt == null) {
             attempt = 5;
         }

@@ -18,7 +18,11 @@ import javax.swing.JOptionPane;
 
 import org.openstreetmap.josm.actions.ExpertToggleAction;
 import org.openstreetmap.josm.actions.JosmAction;
+import org.openstreetmap.josm.actions.UnGlueAction;
+import org.openstreetmap.josm.actions.downloadtasks.DownloadOsmTask;
+import org.openstreetmap.josm.actions.downloadtasks.DownloadTaskList;
 import org.openstreetmap.josm.actions.downloadtasks.PostDownloadHandler;
+import org.openstreetmap.josm.actions.relation.DownloadRelationAction;
 import org.openstreetmap.josm.command.AddCommand;
 import org.openstreetmap.josm.command.Command;
 import org.openstreetmap.josm.command.DeleteCommand;
@@ -47,6 +51,9 @@ import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.MapFrame;
 import org.openstreetmap.josm.gui.Notification;
 import org.openstreetmap.josm.gui.dialogs.relation.DownloadRelationTask;
+import org.openstreetmap.josm.gui.io.DownloadPrimitivesTask;
+import org.openstreetmap.josm.gui.io.DownloadPrimitivesWithReferrersTask;
+import org.openstreetmap.josm.gui.progress.swing.PleaseWaitProgressMonitor;
 import org.openstreetmap.josm.gui.util.GuiHelper;
 import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
 import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
@@ -56,12 +63,19 @@ import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
 import org.openstreetmap.josm.data.osm.Node;
 import org.openstreetmap.josm.tools.Pair;
+import org.openstreetmap.josm.data.preferences.IntegerProperty;
 
 import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Callable;
 
 /**
  * Extends current selection by selecting nodes on all touched ways
@@ -70,9 +84,11 @@ public class MagicCutterAction extends JosmAction {
 
     private DataSet ds;
     Map<String, String> tags = new HashMap<>();
+    public static final IntegerProperty OSM_DOWNLOAD_TIMEOUT = new IntegerProperty("remotecontrol.osm.download.timeout",
+            5 * 60);
 
     public MagicCutterAction() {
-        super(tr("Magic Multipolygon Cutter"), "intway", tr("Select intersecting ways"),
+        super(tr("Magic Multipolygon Cutter"), "multipolygon", tr("Select intersecting ways"),
                 Shortcut.registerShortcut("tools:intway", tr("Selection: {0}", tr("Intersecting ways")),
                         KeyEvent.VK_I, Shortcut.DIRECT),
                 true);
@@ -80,13 +96,38 @@ public class MagicCutterAction extends JosmAction {
     }
 
     @Override
-    public void actionPerformed(ActionEvent e) {
+    public synchronized void actionPerformed(ActionEvent e) {
         ds = getLayerManager().getActiveDataSet();
         Collection<Way> selectedWays = ds.getSelectedWays();
 
         if (!selectedWays.isEmpty()) {
+
+            Logging.info("===========Positive Started ");
+
             cutWithOffset(selectedWays, "positive");
+
+            Logging.info("===========Negative Started ");
+
             cutWithOffset(selectedWays, "negative");
+
+            // try {
+            // // Submit the first task
+            // Future<?> firstTaskFuture = MainApplication.worker.submit(() -> {
+            // Logging.info("===========Positive Started ");
+            // cutWithOffset(selectedWays, "positive");
+            // });
+
+            // firstTaskFuture.get();
+
+            // MainApplication.worker.submit(() -> {
+            // Logging.info("===========Negative Started ");
+            // cutWithOffset(selectedWays, "negative");
+            // });
+
+            // } catch (InterruptedException | ExecutionException e4) {
+            // e4.printStackTrace();
+            // }
+
         } else {
             new Notification(
                     tr("Please select some ways to find connected and intersecting ways!"))
@@ -94,7 +135,7 @@ public class MagicCutterAction extends JosmAction {
         }
     }
 
-    public void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
+    public synchronized void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
 
         Collection<Way> allWays = ds.getWays();
         Set<Way> newIntersectedWays = new HashSet<>();
@@ -110,24 +151,222 @@ public class MagicCutterAction extends JosmAction {
 
                 // Check if all memebers are downloaded
                 if (relation.getIncompleteMembers().size() > 0) {
+
+                    // TODO UnGlueAction.waitFuture(null, null);
+
+                    // Callable<Void> downloadTaskCallable = () -> {
+                    // // Create an instance of DownloadRelationTask
+                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer());
+
+                    // // Execute the task
+                    // downloadTask.run();
+
+                    // return null;
+                    // };
+
+                    // MainApplication.worker.submit(new
+                    // DownloadPrimitivesTask(MainApplication.getLayerManager().getEditLayer(),
+                    // Collections.singletonList(relation), true));
+
+                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer());
+
+                    // AtomicBoolean isTaskRunning = new AtomicBoolean(true);
+
+                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer());
+
+                    // Logging.info("Download started, relation incomplete members count: "
+                    // + relation.getIncompleteMembers().size());
+                    // MainApplication.worker.submit(() -> {
+                    // downloadTask.run();
+
+                    // Logging.info("Download completed! Relation incomplete members count: "
+                    // + relation.getIncompleteMembers().size());
+                    // });
+
+                    // Logging.info("Download started, relation incomplete members count: "
+                    // + relation.getIncompleteMembers().size());
+                    // // Submit the download task and get a Future representing the task
+                    // Future<?> future = MainApplication.worker.submit(() -> {
+                    // new DownloadRelationTask(Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()).run();
+                    // });
+
+                    // // Check if the task is done
+                    // while (!future.isDone()) {
+                    // // Task is not done yet, wait for some time before checking again
+                    // try {
+                    // Thread.sleep(100); // Wait for 100 milliseconds
+                    // } catch (InterruptedException e) {
+                    // e.printStackTrace();
+                    // }
+                    // }
+
+                    // Logging.info("Download completed! Relation members count: "
+                    // + relation.getIncompleteMembers().size());
+
+                    // Submit the download task and wait for completion
+                    // try {
+                        DownloadAlongAction.
+
+                    final PleaseWaitProgressMonitor monitor = new PleaseWaitProgressMonitor(tr("Download data"));
+
+                    // final Future<?> future1 = new DownloadTaskList(
+                    // Config.getPref().getBoolean("update.data.zoom-after-download"))
+                    // .download(false /* no new layer */, areasToDownload, true, false, monitor);
+
+                    DownloadRelationTask downloadTask = new DownloadRelationTask(
+                            Collections.singletonList(relation),
+                            MainApplication.getLayerManager().getEditLayer());
+
+                    Future<?> future = MainApplication.worker.submit(downloadTask);
+
+                    waitFuture(future, monitor);
+
+                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer());
+
+                    Logging.info("Download started, relation incomplete members count: "
+                            + relation.getIncompleteMembers().size());
+
+                    // Submit the download task and get a Future representing the task
+                    // Future<?> future = MainApplication.worker.submit(() -> {
+                    // new DownloadRelationTask(Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()).run();
+                    // Logging.info("Download completed! Relation members count: "
+                    // + relation.getIncompleteMembers().size());
+
+                    // });
+
+                    // Wait for the download task to complete
+                    // future.get();
+                    // Logging.info("Download completed 2! Relation members count: "
+                    // + relation.getIncompleteMembers().size());
+
+                    // // Task completed successfully
+                    // System.out.println("Download completed!");
+                    // } catch (InterruptedException | ExecutionException e) {
+                    // // Handle any exceptions that may occur during task execution
+                    // e.printStackTrace();
+                    // }
+
+                    Logging.info("Relation is complete!"
+                            + relation.getIncompleteMembers().size());
+
+                    // Now proceed with the logic for downloaded Relation
+
+                    // CountDownLatch
+                    // AtomicBoolean
+
+                    // while (isTaskRunning.get()) {
+                    // Logging.info("Calculating...");
+                    // try {
+
+                    // Thread.sleep(200); // Adjust the sleep interval as needed
+                    // } catch (InterruptedException e) {
+                    // e.printStackTrace();
+                    // }
+
+                    // }
+
+                    // MainApplication.worker.submit(downloadTask);
+
+                    // MainApplication.worker.submit(() -> {
+                    // while(!future.isDone()) {
+
+                    // Logging.info("Calculating...");
+                    // downloadTask.run();
+                    // Thread.sleep(300);
+                    // }
+
+                    // try {
+                    // Logging.info("Download completed! 1" +
+                    // relation.getIncompleteMembers().size());
+                    // future.get();
+                    // Logging.info("Download completed!2 " +
+                    // relation.getIncompleteMembers().size());
+                    // } catch (InterruptedException | ExecutionException e) {
+                    // // TODO Auto-generated catch block
+                    // e.printStackTrace();
+                    // }
+
+                    // });
+
+                    // MainApplication.worker.submit(() -> {
+                    // // downloadTask.get();
+                    // Logging.info("Download completed!" + relation.getIncompleteMembers().size());
+                    // });
+
+                    // Future<?> downloadFuture1 = MainApplication.worker.submit(() -> {
+                    // new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()).run();
+                    // });
+
+                    // Create a DownloadRelationTask
+                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
+                    // Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer());
+
+                    // Submit the task to the worker for asynchronous execution
+                    // Future<Void> downloadFuture =
+                    // MainApplication.worker.submit(downloadTaskCallable);
+
+                    // //MainApplication.worker.submit(new PostDownloadHandler(downloadTaskCallable,
+                    // downloadFuture));
+
+                    // try {
+                    // // Wait for the completion of the DownloadRelationTask
+                    // Logging.info("Do stuff with relation " +
+                    // relation.getIncompleteMembers().size());
+                    // // downloadFuture.isDone();
+                    // downloadFuture.get();
+
+                    // // Perform additional tasks after the download completes
+                    // Logging.info("Do stuff with relation2 " +
+                    // relation.getIncompleteMembers().size());
+                    // processRelation(relation, selectedWays, offsetMode);
+
+                    // } catch (InterruptedException | ExecutionException ex) {
+                    // ex.printStackTrace();
+                    // }
+
+                    // MainApplication.worker.submit(() -> {
+                    // Logging.info("Download Started " + relation.getIncompleteMembers().size());
+                    // new DownloadRelationTask(Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()).run();
+
+                    // // Do stuff with relation
+                    // Logging.info("Do stuff with relation " +
+                    // relation.getIncompleteMembers().size());
+                    // processRelation(relation, selectedWays, offsetMode);
+
+                    // });
+
                     // Submit the DownloadRelationTask to the worker
-                    Logging.info("Download Started " + relation.getIncompleteMembers().size());
-                    Future<?> task = MainApplication.worker.submit(
-                            new DownloadRelationTask(Collections.singletonList(relation),
-                                    MainApplication.getLayerManager().getEditLayer()));
+                    // Logging.info("Download Started " + relation.getIncompleteMembers().size());
+                    // Future<?> task = MainApplication.worker.submit(
+                    // new DownloadRelationTask(Collections.singletonList(relation),
+                    // MainApplication.getLayerManager().getEditLayer()));
 
-                    MainApplication.worker.submit(() -> {
+                    // MainApplication.worker.submit(() -> {
 
-                        try {
-                            task.get();
-                            Logging.info("Download completed!" + relation.getIncompleteMembers().size());
-                            processRelation(relation, selectedWays, offsetMode);
+                    // try {
+                    // task.get();
+                    // Logging.info("Download completed!" + relation.getIncompleteMembers().size());
+                    // processRelation(relation, selectedWays, offsetMode);
 
-                        } catch (InterruptedException | ExecutionException e3) {
-                            Logging.error(e3);
-                        }
+                    // } catch (InterruptedException | ExecutionException e3) {
+                    // Logging.error(e3);
+                    // }
 
-                    });
+                    // });
 
                 } else {
                     processRelation(relation, selectedWays, offsetMode);
@@ -143,7 +382,6 @@ public class MagicCutterAction extends JosmAction {
 
         processWay(relation, selectedWays, "first", offsetMode);
         processWay(relation, selectedWays, "last", offsetMode);
-
 
     }
 
@@ -220,10 +458,11 @@ public class MagicCutterAction extends JosmAction {
 
                     try {
                         Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
-                        // Pair<List<Relation>, List<Command>> Pairs =
-                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement, true);
-                        // List<Relation> newRelations = SplitObjectAction.splitMultipolygonAtWay(relation, wayElement,
-                        //         true).a;
+                        Pair<List<Relation>, List<Command>> Pairs = SplitObjectAction.splitMultipolygonAtWay(relation,
+                                wayElement, true);
+                        // List<Relation> newRelations =
+                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement,
+                        // true).a;
                         Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
 
                     } catch (IllegalArgumentException err) {

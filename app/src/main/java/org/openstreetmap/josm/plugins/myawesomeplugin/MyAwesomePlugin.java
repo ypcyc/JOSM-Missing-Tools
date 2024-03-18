@@ -7,7 +7,7 @@ import org.openstreetmap.josm.gui.MainMenu;
 import org.openstreetmap.josm.plugins.Plugin;
 import org.openstreetmap.josm.plugins.PluginInformation;
 import org.openstreetmap.josm.plugins.myawesomeplugin.actions.MagicCutterAction;
-import org.openstreetmap.josm.plugins.myawesomeplugin.actions.RunMagic;
+import org.openstreetmap.josm.plugins.myawesomeplugin.actions.MagicUnlink;
 
 public class MyAwesomePlugin extends Plugin {
     /**
@@ -21,7 +21,7 @@ public class MyAwesomePlugin extends Plugin {
         //JMenu editMenu = MainApplication.getMenu().editMenu;
         JMenu toolsMenu = MainApplication.getMenu().moreToolsMenu;
 
-        MainMenu.add(toolsMenu, new RunMagic());
+        MainMenu.add(toolsMenu, new MagicUnlink());
         MainMenu.add(toolsMenu, new MagicCutterAction());
      }
 

@@ -5,6 +5,8 @@ import static org.openstreetmap.josm.tools.I18n.tr;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.awt.geom.Area;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -15,11 +17,14 @@ import java.util.List;
 import java.util.Set;
 
 import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 
 import org.openstreetmap.josm.actions.ExpertToggleAction;
 import org.openstreetmap.josm.actions.JosmAction;
 import org.openstreetmap.josm.actions.UnGlueAction;
 import org.openstreetmap.josm.actions.downloadtasks.DownloadOsmTask;
+import org.openstreetmap.josm.actions.downloadtasks.DownloadTask;
 import org.openstreetmap.josm.actions.downloadtasks.DownloadTaskList;
 import org.openstreetmap.josm.actions.downloadtasks.PostDownloadHandler;
 import org.openstreetmap.josm.actions.relation.DownloadRelationAction;
@@ -33,11 +38,13 @@ import org.openstreetmap.josm.data.coor.EastNorth;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.osm.DataSet;
 import org.openstreetmap.josm.data.osm.DefaultNameFormatter;
+import org.openstreetmap.josm.data.osm.MultipolygonBuilder;
 import org.openstreetmap.josm.data.osm.OsmPrimitive;
 import org.openstreetmap.josm.data.osm.PrimitiveId;
 import org.openstreetmap.josm.data.osm.Relation;
 import org.openstreetmap.josm.data.osm.RelationMember;
 import org.openstreetmap.josm.data.osm.Way;
+import org.openstreetmap.josm.data.osm.MultipolygonBuilder.JoinedPolygon;
 import org.openstreetmap.josm.data.osm.search.SearchCompiler;
 import org.openstreetmap.josm.data.osm.search.SearchCompiler.Match;
 import org.openstreetmap.josm.data.osm.search.SearchParseError;
@@ -50,17 +57,22 @@ import org.openstreetmap.josm.gui.ExtendedDialog;
 import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.MapFrame;
 import org.openstreetmap.josm.gui.Notification;
+import org.openstreetmap.josm.gui.dialogs.relation.DownloadRelationMemberTask;
 import org.openstreetmap.josm.gui.dialogs.relation.DownloadRelationTask;
 import org.openstreetmap.josm.gui.io.DownloadPrimitivesTask;
 import org.openstreetmap.josm.gui.io.DownloadPrimitivesWithReferrersTask;
 import org.openstreetmap.josm.gui.progress.swing.PleaseWaitProgressMonitor;
 import org.openstreetmap.josm.gui.util.GuiHelper;
+import org.openstreetmap.josm.io.OsmTransferException;
+import org.openstreetmap.josm.plugins.PluginHandler;
 import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
 import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.CopyList;
 import org.openstreetmap.josm.tools.Geometry;
 import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
+import org.xml.sax.SAXException;
+
 import org.openstreetmap.josm.data.osm.Node;
 import org.openstreetmap.josm.tools.Pair;
 import org.openstreetmap.josm.data.preferences.IntegerProperty;
@@ -83,6 +95,11 @@ import java.util.concurrent.Callable;
 public class MagicCutterAction extends JosmAction {
 
     private DataSet ds;
+    Collection<Way> allWays;
+    Way selectedWay;
+    String offsetMode;
+    Set<Relation> newRelations;
+
     Map<String, String> tags = new HashMap<>();
     public static final IntegerProperty OSM_DOWNLOAD_TIMEOUT = new IntegerProperty("remotecontrol.osm.download.timeout",
             5 * 60);
@@ -99,34 +116,29 @@ public class MagicCutterAction extends JosmAction {
     public synchronized void actionPerformed(ActionEvent e) {
         ds = getLayerManager().getActiveDataSet();
         Collection<Way> selectedWays = ds.getSelectedWays();
+        newRelations = new HashSet<>();
 
-        if (!selectedWays.isEmpty()) {
+        if (!selectedWays.isEmpty() && selectedWays.size() == 1) {
 
-            Logging.info("===========Positive Started ");
+            // Selected
+            Iterator<Way> iterator = selectedWays.iterator();
+            this.selectedWay = iterator.next();
 
-            cutWithOffset(selectedWays, "positive");
+            this.allWays = ds.getWays();
 
-            Logging.info("===========Negative Started ");
+            this.offsetMode = "positive";
 
-            cutWithOffset(selectedWays, "negative");
+            Relation foundRelation = getCrossingRelation(this.selectedWay);
 
-            // try {
-            // // Submit the first task
-            // Future<?> firstTaskFuture = MainApplication.worker.submit(() -> {
+            checkIfRelationIsComplete(foundRelation);
+
             // Logging.info("===========Positive Started ");
+
             // cutWithOffset(selectedWays, "positive");
-            // });
 
-            // firstTaskFuture.get();
-
-            // MainApplication.worker.submit(() -> {
             // Logging.info("===========Negative Started ");
-            // cutWithOffset(selectedWays, "negative");
-            // });
 
-            // } catch (InterruptedException | ExecutionException e4) {
-            // e4.printStackTrace();
-            // }
+            // cutWithOffset(selectedWays, "negative");
 
         } else {
             new Notification(
@@ -135,261 +147,346 @@ public class MagicCutterAction extends JosmAction {
         }
     }
 
-    public synchronized void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
+    private void checkIfRelationIsComplete(Relation relation) {
 
-        Collection<Way> allWays = ds.getWays();
+        if (relation.getIncompleteMembers().size() > 0) {
+
+            DownloadPrimitivesTask downloadTask = new DownloadPrimitivesTask(
+                    MainApplication.getLayerManager().getEditLayer(),
+                    Collections.singletonList(relation), true);
+
+            Future<?> future = MainApplication.worker.submit(downloadTask);
+
+            Runnable runAfterTask = new Runnable() {
+                public void run() {
+                    // this is not strictly necessary because of the type of executor service
+                    // Main.worker is initialized with, but it doesn't harm either
+                    //
+                    try {
+                        future.get();
+                        Logging.info("Downloaded");
+
+                        cutRelation(relation);
+
+                        // condition.set(true);
+                    } catch (InterruptedException | ExecutionException e) {
+
+                        e.printStackTrace();
+                    }
+                }
+            };
+            MainApplication.worker.submit(runAfterTask);
+
+        } else {
+            //
+            cutRelation(relation);
+        }
+    }
+
+    public Relation getCrossingRelation(Way selectedWay) {
+
         Set<Way> newIntersectedWays = new HashSet<>();
         // Check ways that intersects with selected Way
-        NodeWayUtils.addWaysIntersectingWays(allWays, selectedWays, newIntersectedWays);
+        NodeWayUtils.addWaysIntersectingWays(this.allWays, Collections.singletonList(selectedWay), newIntersectedWays);
 
         // Check if intersected Way is part of Relation
         Set<Relation> parentRelations = OsmPrimitive.getParentRelations(newIntersectedWays);
 
         for (Relation relation : parentRelations) {
-            // Check Relation type is Multipolygon
+
             if ("multipolygon".equals(relation.get("type"))) {
-
-                // Check if all memebers are downloaded
-                if (relation.getIncompleteMembers().size() > 0) {
-
-                    // TODO UnGlueAction.waitFuture(null, null);
-
-                    // Callable<Void> downloadTaskCallable = () -> {
-                    // // Create an instance of DownloadRelationTask
-                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer());
-
-                    // // Execute the task
-                    // downloadTask.run();
-
-                    // return null;
-                    // };
-
-                    // MainApplication.worker.submit(new
-                    // DownloadPrimitivesTask(MainApplication.getLayerManager().getEditLayer(),
-                    // Collections.singletonList(relation), true));
-
-                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer());
-
-                    // AtomicBoolean isTaskRunning = new AtomicBoolean(true);
-
-                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer());
-
-                    // Logging.info("Download started, relation incomplete members count: "
-                    // + relation.getIncompleteMembers().size());
-                    // MainApplication.worker.submit(() -> {
-                    // downloadTask.run();
-
-                    // Logging.info("Download completed! Relation incomplete members count: "
-                    // + relation.getIncompleteMembers().size());
-                    // });
-
-                    // Logging.info("Download started, relation incomplete members count: "
-                    // + relation.getIncompleteMembers().size());
-                    // // Submit the download task and get a Future representing the task
-                    // Future<?> future = MainApplication.worker.submit(() -> {
-                    // new DownloadRelationTask(Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()).run();
-                    // });
-
-                    // // Check if the task is done
-                    // while (!future.isDone()) {
-                    // // Task is not done yet, wait for some time before checking again
-                    // try {
-                    // Thread.sleep(100); // Wait for 100 milliseconds
-                    // } catch (InterruptedException e) {
-                    // e.printStackTrace();
-                    // }
-                    // }
-
-                    // Logging.info("Download completed! Relation members count: "
-                    // + relation.getIncompleteMembers().size());
-
-                    // Submit the download task and wait for completion
-                    // try {
-                        DownloadAlongAction.
-
-                    final PleaseWaitProgressMonitor monitor = new PleaseWaitProgressMonitor(tr("Download data"));
-
-                    // final Future<?> future1 = new DownloadTaskList(
-                    // Config.getPref().getBoolean("update.data.zoom-after-download"))
-                    // .download(false /* no new layer */, areasToDownload, true, false, monitor);
-
-                    DownloadRelationTask downloadTask = new DownloadRelationTask(
-                            Collections.singletonList(relation),
-                            MainApplication.getLayerManager().getEditLayer());
-
-                    Future<?> future = MainApplication.worker.submit(downloadTask);
-
-                    waitFuture(future, monitor);
-
-                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer());
-
-                    Logging.info("Download started, relation incomplete members count: "
-                            + relation.getIncompleteMembers().size());
-
-                    // Submit the download task and get a Future representing the task
-                    // Future<?> future = MainApplication.worker.submit(() -> {
-                    // new DownloadRelationTask(Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()).run();
-                    // Logging.info("Download completed! Relation members count: "
-                    // + relation.getIncompleteMembers().size());
-
-                    // });
-
-                    // Wait for the download task to complete
-                    // future.get();
-                    // Logging.info("Download completed 2! Relation members count: "
-                    // + relation.getIncompleteMembers().size());
-
-                    // // Task completed successfully
-                    // System.out.println("Download completed!");
-                    // } catch (InterruptedException | ExecutionException e) {
-                    // // Handle any exceptions that may occur during task execution
-                    // e.printStackTrace();
-                    // }
-
-                    Logging.info("Relation is complete!"
-                            + relation.getIncompleteMembers().size());
-
-                    // Now proceed with the logic for downloaded Relation
-
-                    // CountDownLatch
-                    // AtomicBoolean
-
-                    // while (isTaskRunning.get()) {
-                    // Logging.info("Calculating...");
-                    // try {
-
-                    // Thread.sleep(200); // Adjust the sleep interval as needed
-                    // } catch (InterruptedException e) {
-                    // e.printStackTrace();
-                    // }
-
-                    // }
-
-                    // MainApplication.worker.submit(downloadTask);
-
-                    // MainApplication.worker.submit(() -> {
-                    // while(!future.isDone()) {
-
-                    // Logging.info("Calculating...");
-                    // downloadTask.run();
-                    // Thread.sleep(300);
-                    // }
-
-                    // try {
-                    // Logging.info("Download completed! 1" +
-                    // relation.getIncompleteMembers().size());
-                    // future.get();
-                    // Logging.info("Download completed!2 " +
-                    // relation.getIncompleteMembers().size());
-                    // } catch (InterruptedException | ExecutionException e) {
-                    // // TODO Auto-generated catch block
-                    // e.printStackTrace();
-                    // }
-
-                    // });
-
-                    // MainApplication.worker.submit(() -> {
-                    // // downloadTask.get();
-                    // Logging.info("Download completed!" + relation.getIncompleteMembers().size());
-                    // });
-
-                    // Future<?> downloadFuture1 = MainApplication.worker.submit(() -> {
-                    // new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()).run();
-                    // });
-
-                    // Create a DownloadRelationTask
-                    // DownloadRelationTask downloadTask = new DownloadRelationTask(
-                    // Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer());
-
-                    // Submit the task to the worker for asynchronous execution
-                    // Future<Void> downloadFuture =
-                    // MainApplication.worker.submit(downloadTaskCallable);
-
-                    // //MainApplication.worker.submit(new PostDownloadHandler(downloadTaskCallable,
-                    // downloadFuture));
-
-                    // try {
-                    // // Wait for the completion of the DownloadRelationTask
-                    // Logging.info("Do stuff with relation " +
-                    // relation.getIncompleteMembers().size());
-                    // // downloadFuture.isDone();
-                    // downloadFuture.get();
-
-                    // // Perform additional tasks after the download completes
-                    // Logging.info("Do stuff with relation2 " +
-                    // relation.getIncompleteMembers().size());
-                    // processRelation(relation, selectedWays, offsetMode);
-
-                    // } catch (InterruptedException | ExecutionException ex) {
-                    // ex.printStackTrace();
-                    // }
-
-                    // MainApplication.worker.submit(() -> {
-                    // Logging.info("Download Started " + relation.getIncompleteMembers().size());
-                    // new DownloadRelationTask(Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()).run();
-
-                    // // Do stuff with relation
-                    // Logging.info("Do stuff with relation " +
-                    // relation.getIncompleteMembers().size());
-                    // processRelation(relation, selectedWays, offsetMode);
-
-                    // });
-
-                    // Submit the DownloadRelationTask to the worker
-                    // Logging.info("Download Started " + relation.getIncompleteMembers().size());
-                    // Future<?> task = MainApplication.worker.submit(
-                    // new DownloadRelationTask(Collections.singletonList(relation),
-                    // MainApplication.getLayerManager().getEditLayer()));
-
-                    // MainApplication.worker.submit(() -> {
-
-                    // try {
-                    // task.get();
-                    // Logging.info("Download completed!" + relation.getIncompleteMembers().size());
-                    // processRelation(relation, selectedWays, offsetMode);
-
-                    // } catch (InterruptedException | ExecutionException e3) {
-                    // Logging.error(e3);
-                    // }
-
-                    // });
-
-                } else {
-                    processRelation(relation, selectedWays, offsetMode);
-                }
-
+                return relation;
             }
 
         }
 
-    }
-
-    public void processRelation(Relation relation, Collection<Way> selectedWays, String offsetMode) {
-
-        processWay(relation, selectedWays, "first", offsetMode);
-        processWay(relation, selectedWays, "last", offsetMode);
+        return null;
 
     }
 
-    public void processWay(Relation relation, Collection<Way> selectedWays, String direction, String mode) {
+    public void cutRelation(Relation relation) {
+
+        Set<Relation> relations = new HashSet<>();
+
+        // complete Relation
+        processRelation(relation, this.selectedWay, this.offsetMode);
+
+        relations.add(relation);
+        this.offsetMode = "negative";
+
+        relation = getCrossingRelation(this.selectedWay);
+        processRelation(relation, this.selectedWay, this.offsetMode);
+
+        relations.add(relation);
+
+        // final relation to be deleted
+        relation = getCrossingRelation(this.selectedWay);
+
+        Collection<OsmPrimitive> relationToDelete = new ArrayList<>();
+        relationToDelete.add(relation);
+
+        for (Way way : relation.getMemberPrimitives(Way.class)) {
+            Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
+            if (parentRelations.size() == 1) {
+                relationToDelete.add(way);
+            }
+        }
+
+        if (!relationToDelete.isEmpty()) {
+
+            Command cmd = DeleteCommand.delete(relationToDelete, true, false);
+            UndoRedoHandler.getInstance().add(cmd);
+
+        }
+
+        this.newRelations.addAll(relations);
+        getLayerManager().getEditDataSet().setSelected(this.newRelations);
+
+    }
+
+    public void processRelation(Relation relation, Way selectedWay, String offsetMode) {
+
+        tryToCutRelationWithWayV2(relation, selectedWay, offsetMode);
+        // tryToCutRelationWithWay(relation, selectedWay, "first", offsetMode);
+        // tryToCutRelationWithWay(relation, selectedWay, "last", offsetMode);
+
+    }
+
+    void tryToCutRelationWithWayV2(Relation relation, Way selectedWay, String offsetMode) {
+
+        // 1 check start/end point ouside outer polygon
+        boolean firstOutside = checkNodeWithinMultipolygon(relation, selectedWay.firstNode());
+        boolean latstOutside = checkNodeWithinMultipolygon(relation, selectedWay.lastNode());
+
+        Node startingNode;
+
+        if (firstOutside && latstOutside) {
+            // error
+        } else if (firstOutside) {
+            startingNode = selectedWay.firstNode();
+        } else if (latstOutside) {
+            startingNode = selectedWay.lastNode();
+        }
+
+        // 2 check if selected way crosses inner polygon
+        Set<Way> newIntersectedWays = new HashSet<>();
+        // Check ways that intersects with selected Way
+        // boolean crossingInner = false;
+        Way crossingInnerWay = null;
+
+        NodeWayUtils.addWaysIntersectingWays(this.allWays, Collections.singletonList(selectedWay), newIntersectedWays);
+
+        // TODO check if inner is closest to outer
+        relation.getMemberPrimitives(Way.class);
+        List<OsmPrimitive> innerMembers = new ArrayList<>(relation.findRelationMembers("inner"));
+        for (OsmPrimitive primitive : innerMembers) {
+            if (primitive instanceof Way) {
+                Way wayElement = (Way) primitive;
+                // crossingInner = ;
+                if (newIntersectedWays.contains(wayElement)) {
+                    crossingInnerWay = wayElement;
+                    break;
+                }
+            }
+        }
+
+        // 3 if not, check if line crosses polygon fully, proceed with standard to find
+        // next way for offset if not fully crossed
+        // if crosses, needs offset line?, get nodes of way, check until first will be
+        // inside inner
+        if (crossingInnerWay != null) {
+
+            Collection<Way> ways = new ArrayList<>(relation.getMemberPrimitives(Way.class));
+            MultipolygonBuilder multipolygon = new MultipolygonBuilder();
+            String error = multipolygon.makeFromWays(ways);
+            // if (error != null)
+            // return null;
+            List<JoinedPolygon> innerRings = multipolygon.innerWays;
+
+            Area innerArea = null;
+
+            for (JoinedPolygon innerRing : innerRings) {
+                List<Way> innerWays = innerRing.ways;
+                if (innerWays.contains(crossingInnerWay)) {
+                    //
+                    innerArea = innerRing.area;
+                }
+            }
+
+            List<Node> collectedWays = new ArrayList<>();
+
+            Way firstWay = checkWayAndTryToMinimize(selectedWay, startingNode, innerArea, 3, mode);
+
+            // MultipolygonBuilder.JoinedPolygon
+        }
+
+        // copy new way using start and found node
+        // intersecting ways -> nodes, split -> removeoutside
+        // keep new nodes -> split inner , and outer
+        // compare by length
+        // delete holes
+        // add new lines to relation with outer roles
+        // replace innrer roles to outer
+
+    }
+
+    // private boolean isOuterMemberOfMultipolygon(OsmPrimitive ref) {
+    // return ref instanceof Relation
+    // && ref.isSelected()
+    // && ((Relation) ref).isMultipolygon()
+    // && ((Relation) ref).getMembersFor(Collections.singleton(this)).stream()
+    // .anyMatch(rm -> "outer".equals(rm.getRole()));
+    // }
+
+    // public void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
+
+    // Collection<Way> allWays = ds.getWays();
+    // Set<Way> newIntersectedWays = new HashSet<>();
+    // // Check ways that intersects with selected Way
+    // NodeWayUtils.addWaysIntersectingWays(allWays, selectedWays,
+    // newIntersectedWays);
+
+    // // Check if intersected Way is part of Relation
+    // Set<Relation> parentRelations =
+    // OsmPrimitive.getParentRelations(newIntersectedWays);
+
+    // for (Relation relation : parentRelations) {
+    // // Check Relation type is Multipolygon
+    // if ("multipolygon".equals(relation.get("type"))) {
+
+    // // Check if all memebers are downloaded
+    // if (relation.getIncompleteMembers().size() > 0) {
+
+    // DownloadPrimitivesTask downTask = new DownloadPrimitivesTask(
+    // MainApplication.getLayerManager().getEditLayer(),
+    // Collections.singletonList(relation), true);
+
+    // // Runnable runAfterTask = new Runnable() {
+    // // public void run() {
+    // // // this is not strictly necessary because of the type of executor service
+    // // // Main.worker is initialized with, but it doesn't harm either
+    // // //
+    // // try {
+    // // future.get();
+    // // Logging.info("Download co try");
+
+    // // condition.set(true);
+    // // } catch (InterruptedException | ExecutionException e) {
+
+    // // e.printStackTrace();
+    // // }
+    // // }
+    // // };
+    // // MainApplication.worker.submit(runAfterTask);
+
+    // Thread appThread = new Thread() {
+    // public void run() {
+    // try {
+    // SwingUtilities.invokeLater(downTask);
+    // } catch (Exception e) {
+    // e.printStackTrace();
+    // }
+    // System.out.println("Finished on " + Thread.currentThread());
+    // }
+    // };
+    // appThread.start();
+
+    // // AtomicBoolean condition = new AtomicBoolean(false);
+
+    // // // Set<OsmPrimitive> ret = new HashSet<>(relation.getIncompleteMembers());
+
+    // // // DownloadOsmTask task = new DownloadOsmTask();
+
+    // // // DownloadRelationTask
+    // // // DownloadRelationMemberTask
+
+    // // DownloadPrimitivesTask downTask = new DownloadPrimitivesTask(
+    // // MainApplication.getLayerManager().getEditLayer(),
+    // // Collections.singletonList(relation), true);
+
+    // // // Future<?> future = MainApplication.worker
+    // // // .submit(new
+    // // //
+    // DownloadPrimitivesTask(MainApplication.getLayerManager().getEditLayer(),
+    // // // Collections.singletonList(relation), true));
+
+    // // // DownloadRelationTask downTask = new DownloadRelationTask(
+    // // // Collections.singletonList(relation),
+    // // // MainApplication.getLayerManager().getEditLayer());
+
+    // // // downTask.canRunInBackground()
+    // // // Object lock = new Object();
+
+    // // Future<?> future = MainApplication.worker.submit(downTask);
+
+    // // Runnable runAfterTask = new Runnable() {
+    // // public void run() {
+    // // // this is not strictly necessary because of the type of executor service
+    // // // Main.worker is initialized with, but it doesn't harm either
+    // // //
+    // // try {
+    // // future.get();
+    // // Logging.info("Download co try");
+
+    // // condition.set(true);
+    // // } catch (InterruptedException | ExecutionException e) {
+
+    // // e.printStackTrace();
+    // // }
+    // // }
+    // // };
+    // // MainApplication.worker.submit(runAfterTask);
+
+    // // // Thread thr = new Thread(runAfterTask);
+    // // // thr.start();
+
+    // // // Thread thr = new Thread(() -> {
+    // // // // Do some background task here
+
+    // // // // Update the UI on the EDT using SwingUtilities.invokeLater()
+
+    // // // SwingUtilities.invokeLater(runAfterTask);
+
+    // // // });
+    // // // thr.start();
+
+    // // while (!condition.get()) {
+    // // System.out.println("Waiting for condition to be true...");
+    // // try {
+    // // Thread.sleep(500);
+    // // } catch (InterruptedException e) {
+    // // // TODO Auto-generated catch block
+    // // e.printStackTrace();
+    // // }
+
+    // // // Logging.info("cool!");
+    // // }
+
+    // Logging.info("Runaway!");
+
+    // } else {
+    // processRelationOld(relation, selectedWays, offsetMode);
+    // }
+
+    // }
+
+    // }
+
+    // }
+
+    // public void processRelationOld(Relation relation, Collection<Way>
+    // selectedWays, String offsetMode) {
+
+    // processWay(relation, selectedWays, "first", offsetMode);
+    // processWay(relation, selectedWays, "last", offsetMode);
+
+    // }
+
+    public void tryToCutRelationWithWay(Relation relation, Way selectedWay, String direction, String mode) {
         Way sourceWay = null;
 
         do {
-            sourceWay = selectedWays.iterator().next();
+            sourceWay = selectedWay;
             Logging.info("Working with way id: " + sourceWay.getUniqueId());
 
             Way finalWayForFirst = checkWayAndTryToFollow(sourceWay, direction, relation, 3, mode);
@@ -460,10 +557,14 @@ public class MagicCutterAction extends JosmAction {
                         Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
                         Pair<List<Relation>, List<Command>> Pairs = SplitObjectAction.splitMultipolygonAtWay(relation,
                                 wayElement, true);
-                        // List<Relation> newRelations =
-                        // SplitObjectAction.splitMultipolygonAtWay(relation, wayElement,
-                        // true).a;
-                        Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
+                        Logging.info("Split succesfull");
+                        List<Relation> newRelations = Pairs.a;
+
+                        for (Relation splitRelation : newRelations) {
+                            if (splitRelation.isNew()) {
+                                this.newRelations.add(splitRelation);
+                            }
+                        }
 
                     } catch (IllegalArgumentException err) {
                         Logging.info("Caught IllegalArgumentException: " + err.getMessage());
@@ -554,6 +655,42 @@ public class MagicCutterAction extends JosmAction {
         return Nodes;
     }
 
+    private Way checkWayAndTryToMinimize(Way initialWay, Node startingNode, Area innerArea) {
+
+        Way partWay = new Way();
+
+        List<Node> initialWayNodes = initialWay.getNodes();
+        if (startingNode.getUniqueId() == initialWay.firstNode().getUniqueId()) {
+            // Forward loop
+            for (int i = 0; i < initialWayNodes.size(); i++) {
+                Node node = initialWayNodes.get(i);
+                partWay.addNode(node);
+                EastNorth en = node.getEastNorth();
+                if (innerArea.contains(en.east(), en.north())) {
+                    break;
+                }
+            }
+
+        } else if (startingNode.getUniqueId() == initialWay.lastNode().getUniqueId()) {
+            // Reverse loop
+            for (int i = initialWayNodes.size() - 1; i >= 0; i--) {
+                Node node = initialWayNodes.get(i);
+                partWay.addNode(node);
+                EastNorth en = node.getEastNorth();
+                if (innerArea.contains(en.east(), en.north())) {
+                    break;
+                }
+            }
+
+        }
+
+        return partWay;
+    }
+
+    // private Way processNode(Node startingNode){
+    // //
+    // }
+
     private Way checkWayAndTryToFollow(Way mergedWay, String direction, Relation relation, Integer attempt,
             String mode) {
         if (attempt == null) {
@@ -566,7 +703,7 @@ public class MagicCutterAction extends JosmAction {
 
             Logging.info("Direction (" + direction + "), Attemt started: " + attempt);
 
-            offsetWay = getOffsetWay(mergedWay, attempt, mode);
+            offsetWay = getOffsetWay(mergedWay, mode);
             Logging.info("offsetWay created");
             Command addOffsetWayCommand = createAddWayCommand(offsetWay);
             UndoRedoHandler.getInstance().add(addOffsetWayCommand);
@@ -575,7 +712,7 @@ public class MagicCutterAction extends JosmAction {
             Node endingOffsetNode = getEndingNode(offsetWay, direction);
             Logging.info("offsetWay END node (" + direction + ") found");
 
-            boolean found = checkNodeWithinMultipolygon(offsetWay, relation, endingOffsetNode);
+            boolean found = checkNodeWithinMultipolygon(relation, endingOffsetNode);
 
             if (found) {
 
@@ -671,7 +808,7 @@ public class MagicCutterAction extends JosmAction {
         return mergedWay;
     }
 
-    private boolean checkNodeWithinMultipolygon(Way offsetWay, Relation relation, Node fNode) {
+    private boolean checkNodeWithinMultipolygon(Relation relation, Node fNode) {
         // Check if created ways start and end points a within relation multipolygon
         Collection<OsmPrimitive> primitivesInsideMultipolygon = NodeWayUtils
                 .selectAllInside(Collections.singletonList(relation), this.ds, false);
@@ -704,7 +841,7 @@ public class MagicCutterAction extends JosmAction {
         return null; // No connected way with the same tags found
     }
 
-    public Way getOffsetWay(Way sourceWay, Integer attempt, String mode) {
+    public Way getOffsetWay(Way sourceWay, String mode) {
 
         // Offset distance in meters
         double offsetDistance = 0.0001;

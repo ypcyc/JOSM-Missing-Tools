@@ -99,6 +99,7 @@ public class MagicCutterAction extends JosmAction {
     Way selectedWay;
     String offsetMode;
     Set<Relation> newRelations;
+    List<Node> intersectionNodes;
 
     Map<String, String> tags = new HashMap<>();
     public static final IntegerProperty OSM_DOWNLOAD_TIMEOUT = new IntegerProperty("remotecontrol.osm.download.timeout",
@@ -166,7 +167,7 @@ public class MagicCutterAction extends JosmAction {
                         future.get();
                         Logging.info("Downloaded");
 
-                        cutRelation(relation);
+                        startCuttingRelation(relation);
 
                         // condition.set(true);
                     } catch (InterruptedException | ExecutionException e) {
@@ -179,7 +180,7 @@ public class MagicCutterAction extends JosmAction {
 
         } else {
             //
-            cutRelation(relation);
+            startCuttingRelation(relation);
         }
     }
 
@@ -204,49 +205,54 @@ public class MagicCutterAction extends JosmAction {
 
     }
 
-    public void cutRelation(Relation relation) {
+    public void startCuttingRelation(Relation relation) {
 
         Set<Relation> relations = new HashSet<>();
 
         // complete Relation
         processRelation(relation, this.selectedWay, this.offsetMode);
 
-        relations.add(relation);
-        this.offsetMode = "negative";
+        //TODO check older version
 
-        relation = getCrossingRelation(this.selectedWay);
-        processRelation(relation, this.selectedWay, this.offsetMode);
+        // relations.add(relation);
+        // this.offsetMode = "negative";
 
-        relations.add(relation);
+        // relation = getCrossingRelation(this.selectedWay);
+        // processRelation(relation, this.selectedWay, this.offsetMode);
 
-        // final relation to be deleted
-        relation = getCrossingRelation(this.selectedWay);
+        // relations.add(relation);
 
-        Collection<OsmPrimitive> relationToDelete = new ArrayList<>();
-        relationToDelete.add(relation);
+        // // final relation to be deleted
+        // relation = getCrossingRelation(this.selectedWay);
 
-        for (Way way : relation.getMemberPrimitives(Way.class)) {
-            Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
-            if (parentRelations.size() == 1) {
-                relationToDelete.add(way);
-            }
-        }
+        // Collection<OsmPrimitive> relationToDelete = new ArrayList<>();
+        // relationToDelete.add(relation);
 
-        if (!relationToDelete.isEmpty()) {
+        // for (Way way : relation.getMemberPrimitives(Way.class)) {
+        //     Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
+        //     if (parentRelations.size() == 1) {
+        //         relationToDelete.add(way);
+        //     }
+        // }
 
-            Command cmd = DeleteCommand.delete(relationToDelete, true, false);
-            UndoRedoHandler.getInstance().add(cmd);
+        // if (!relationToDelete.isEmpty()) {
 
-        }
+        //     Command cmd = DeleteCommand.delete(relationToDelete, true, false);
+        //     UndoRedoHandler.getInstance().add(cmd);
 
-        this.newRelations.addAll(relations);
-        getLayerManager().getEditDataSet().setSelected(this.newRelations);
+        // }
+
+        // this.newRelations.addAll(relations);
+        // getLayerManager().getEditDataSet().setSelected(this.newRelations);
 
     }
 
     public void processRelation(Relation relation, Way selectedWay, String offsetMode) {
 
+        intersectionNodes = new ArrayList<>();
+
         tryToCutRelationWithWayV2(relation, selectedWay, offsetMode);
+        tryToCutRelationWithWayV2(relation, selectedWay, "negative");
         // tryToCutRelationWithWay(relation, selectedWay, "first", offsetMode);
         // tryToCutRelationWithWay(relation, selectedWay, "last", offsetMode);
 
@@ -254,41 +260,41 @@ public class MagicCutterAction extends JosmAction {
 
     void tryToCutRelationWithWayV2(Relation relation, Way selectedWay, String offsetMode) {
 
-        // 1 check start/end point ouside outer polygon
-        boolean firstOutside = checkNodeWithinMultipolygon(relation, selectedWay.firstNode());
-        boolean latstOutside = checkNodeWithinMultipolygon(relation, selectedWay.lastNode());
+        Way offsetWay = createOffsetWay(selectedWay, offsetMode);
+        Logging.info("offsetWay created");
+        Command addOffsetWayCommand = createAddWayCommand(offsetWay);
+        UndoRedoHandler.getInstance().add(addOffsetWayCommand);
+        Logging.info("offsetWay added to dataset: " + offsetWay.getId());
 
-        Node startingNode;
+        // 1 check start/end point ouside outer polygon
+        boolean firstOutside = checkNodeWithinMultipolygon(relation, offsetWay.firstNode());
+        boolean latstOutside = checkNodeWithinMultipolygon(relation, offsetWay.lastNode());
+
+        Node startingNode = null;
 
         if (firstOutside && latstOutside) {
             // error
         } else if (firstOutside) {
-            startingNode = selectedWay.firstNode();
+            startingNode = offsetWay.firstNode();
         } else if (latstOutside) {
-            startingNode = selectedWay.lastNode();
+            startingNode = offsetWay.lastNode();
         }
+
+        // TODO offset way may cross different ways
 
         // 2 check if selected way crosses inner polygon
         Set<Way> newIntersectedWays = new HashSet<>();
         // Check ways that intersects with selected Way
         // boolean crossingInner = false;
         Way crossingInnerWay = null;
+        Way crossingOuterWay = null;
 
-        NodeWayUtils.addWaysIntersectingWays(this.allWays, Collections.singletonList(selectedWay), newIntersectedWays);
+        NodeWayUtils.addWaysIntersectingWays(this.allWays, Collections.singletonList(offsetWay), newIntersectedWays);
 
         // TODO check if inner is closest to outer
-        relation.getMemberPrimitives(Way.class);
-        List<OsmPrimitive> innerMembers = new ArrayList<>(relation.findRelationMembers("inner"));
-        for (OsmPrimitive primitive : innerMembers) {
-            if (primitive instanceof Way) {
-                Way wayElement = (Way) primitive;
-                // crossingInner = ;
-                if (newIntersectedWays.contains(wayElement)) {
-                    crossingInnerWay = wayElement;
-                    break;
-                }
-            }
-        }
+
+        crossingOuterWay = getRelationMemberWayFithRole(relation, newIntersectedWays, "outer");
+        crossingInnerWay = getRelationMemberWayFithRole(relation, newIntersectedWays, "inner");
 
         // 3 if not, check if line crosses polygon fully, proceed with standard to find
         // next way for offset if not fully crossed
@@ -308,16 +314,79 @@ public class MagicCutterAction extends JosmAction {
             for (JoinedPolygon innerRing : innerRings) {
                 List<Way> innerWays = innerRing.ways;
                 if (innerWays.contains(crossingInnerWay)) {
-                    //
+
                     innerArea = innerRing.area;
+                    break;
                 }
             }
 
             List<Node> collectedWays = new ArrayList<>();
 
-            Way firstWay = checkWayAndTryToMinimize(selectedWay, startingNode, innerArea, 3, mode);
+            // if (startingNode != null) {
+            // }
+            Way newShortWay = checkWayAndTryToMinimize(offsetWay, startingNode, innerArea);
+            Logging.info("offsetWay created");
+            Command addShorttWayCommand = createAddWayCommand(newShortWay);
+            UndoRedoHandler.getInstance().add(addShorttWayCommand);
+            Logging.info("newShortWay added to dataset: " + newShortWay.getId());
 
             // MultipolygonBuilder.JoinedPolygon
+            List<Way> wayList = new ArrayList<>();
+            wayList.add(crossingOuterWay);
+            wayList.add(crossingInnerWay);
+            wayList.add(newShortWay);
+            Set<Node> intersectionNodesSet = createIntersection(wayList);
+
+            intersectionNodes.addAll(intersectionNodesSet);
+
+            // Split way
+
+            List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(newShortWay,
+                    intersectionNodes);
+            Logging.info("Waychunks count: " + wayChunks.size());
+
+            SplitWayCommand splitWayCommand = SplitWayCommand.splitWay(newShortWay,
+                    wayChunks, Collections.emptyList());
+            List<Command> cmds = new LinkedList<>();
+            cmds.add(splitWayCommand);
+
+            if (!cmds.isEmpty()) {
+                UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
+                        cmds));
+
+                getLayerManager().getEditDataSet().setSelected(splitWayCommand.getNewSelection());
+
+            }
+
+            //delete unneeded ways
+            Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
+
+            Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
+            waysToDelete.add(offsetWay);
+            
+
+            for (OsmPrimitive element : results) {
+                if (element instanceof Way) {
+
+                    Way wayElement = (Way) element;
+                    if (wayElement.firstNode() == offsetWay.firstNode() || wayElement.lastNode() == offsetWay.lastNode()){
+
+                        //
+                        waysToDelete.add(wayElement);
+                    }
+
+                }
+
+            }
+
+            // delete unused ways
+            if (!waysToDelete.isEmpty()) {
+
+                Command cmd = DeleteCommand.delete(waysToDelete, true, false);
+                UndoRedoHandler.getInstance().add(cmd);
+
+            }
+
         }
 
         // copy new way using start and found node
@@ -327,6 +396,23 @@ public class MagicCutterAction extends JosmAction {
         // delete holes
         // add new lines to relation with outer roles
         // replace innrer roles to outer
+
+    }
+
+    private Way getRelationMemberWayFithRole(Relation relation, Set<Way> intersectedWays, String role) {
+
+        List<OsmPrimitive> membersWithRole = new ArrayList<>(relation.findRelationMembers(role));
+
+        for (OsmPrimitive primitive : membersWithRole) {
+            if (primitive instanceof Way) {
+                Way wayElement = (Way) primitive;
+
+                if (intersectedWays.contains(wayElement)) {
+                    return wayElement;
+                }
+            }
+        }
+        return null;
 
     }
 
@@ -660,22 +746,24 @@ public class MagicCutterAction extends JosmAction {
         Way partWay = new Way();
 
         List<Node> initialWayNodes = initialWay.getNodes();
-        if (startingNode.getUniqueId() == initialWay.firstNode().getUniqueId()) {
+        if (startingNode.getUniqueId() == initialWay.lastNode().getUniqueId()) {
             // Forward loop
             for (int i = 0; i < initialWayNodes.size(); i++) {
                 Node node = initialWayNodes.get(i);
-                partWay.addNode(node);
+                Logging.info("Node for short way: " + i + "  " + node.getUniqueId());
+                partWay.addNode(new Node(node, true));
                 EastNorth en = node.getEastNorth();
                 if (innerArea.contains(en.east(), en.north())) {
                     break;
                 }
             }
 
-        } else if (startingNode.getUniqueId() == initialWay.lastNode().getUniqueId()) {
+        } else if (startingNode.getUniqueId() == initialWay.firstNode().getUniqueId()) {
             // Reverse loop
             for (int i = initialWayNodes.size() - 1; i >= 0; i--) {
                 Node node = initialWayNodes.get(i);
-                partWay.addNode(node);
+                Logging.info("Node for short way: " + i + "  " + node.getUniqueId());
+                partWay.addNode(new Node(node, true));
                 EastNorth en = node.getEastNorth();
                 if (innerArea.contains(en.east(), en.north())) {
                     break;
@@ -703,7 +791,7 @@ public class MagicCutterAction extends JosmAction {
 
             Logging.info("Direction (" + direction + "), Attemt started: " + attempt);
 
-            offsetWay = getOffsetWay(mergedWay, mode);
+            offsetWay = createOffsetWay(mergedWay, mode);
             Logging.info("offsetWay created");
             Command addOffsetWayCommand = createAddWayCommand(offsetWay);
             UndoRedoHandler.getInstance().add(addOffsetWayCommand);
@@ -841,7 +929,7 @@ public class MagicCutterAction extends JosmAction {
         return null; // No connected way with the same tags found
     }
 
-    public Way getOffsetWay(Way sourceWay, String mode) {
+    public Way createOffsetWay(Way sourceWay, String mode) {
 
         // Offset distance in meters
         double offsetDistance = 0.0001;
@@ -875,9 +963,6 @@ public class MagicCutterAction extends JosmAction {
         // Create a new way with the offset nodes
         Way offsetWay = new Way();
 
-        // Split way should not contain tags
-        // tags.put("road", "" + attempt);
-        // tags.put("note", "offset");
         offsetWay.setKeys(tags);
         offsetWay.setNodes(offsetNodes);
 

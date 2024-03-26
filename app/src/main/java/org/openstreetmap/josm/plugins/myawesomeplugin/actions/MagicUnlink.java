@@ -150,10 +150,10 @@ public class MagicUnlink extends JosmAction {
 
                             Collection<Node> newNodes = replaced.values();
 
-                            EastNorth coord = Geometry.getCentroid(selectedWayNodes);
+                            EastNorth centerCoordinates = Geometry.getCentroid(selectedWayNodes);
 
                             for (Node newNode : newNodes) {
-                                moveNodeInDirection(newNode, coord, 0.01);
+                                moveNodeInDirection(newNode, centerCoordinates, 0.01);
                                 allNewNodes.add(newNode);
                             }
 

@@ -8,6 +8,7 @@ import java.awt.event.KeyEvent;
 import java.awt.geom.Area;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -29,6 +30,7 @@ import org.openstreetmap.josm.actions.downloadtasks.DownloadTaskList;
 import org.openstreetmap.josm.actions.downloadtasks.PostDownloadHandler;
 import org.openstreetmap.josm.actions.relation.DownloadRelationAction;
 import org.openstreetmap.josm.command.AddCommand;
+import org.openstreetmap.josm.command.ChangeCommand;
 import org.openstreetmap.josm.command.Command;
 import org.openstreetmap.josm.command.DeleteCommand;
 import org.openstreetmap.josm.command.SequenceCommand;
@@ -73,6 +75,8 @@ import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
 import org.xml.sax.SAXException;
 
+import relcontext.actions.ReconstructPolygonAction;
+
 import org.openstreetmap.josm.data.osm.Node;
 import org.openstreetmap.josm.tools.Pair;
 import org.openstreetmap.josm.data.preferences.IntegerProperty;
@@ -100,6 +104,11 @@ public class MagicCutterAction extends JosmAction {
     String offsetMode;
     Set<Relation> newRelations;
     List<Node> intersectionNodes;
+    List<Way> createdWays;
+    List<Way> crossingOuterWays;
+    List<Way> crossingInnerWays;
+
+    private static final List<String> IRRELEVANT_KEYS = Arrays.asList("source", "created_by", "note");
 
     Map<String, String> tags = new HashMap<>();
     public static final IntegerProperty OSM_DOWNLOAD_TIMEOUT = new IntegerProperty("remotecontrol.osm.download.timeout",
@@ -212,7 +221,7 @@ public class MagicCutterAction extends JosmAction {
         // complete Relation
         processRelation(relation, this.selectedWay, this.offsetMode);
 
-        //TODO check older version
+        // TODO check older version
 
         // relations.add(relation);
         // this.offsetMode = "negative";
@@ -229,16 +238,17 @@ public class MagicCutterAction extends JosmAction {
         // relationToDelete.add(relation);
 
         // for (Way way : relation.getMemberPrimitives(Way.class)) {
-        //     Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
-        //     if (parentRelations.size() == 1) {
-        //         relationToDelete.add(way);
-        //     }
+        // Set<Relation> parentRelations =
+        // OsmPrimitive.getParentRelations(Collections.singleton(way));
+        // if (parentRelations.size() == 1) {
+        // relationToDelete.add(way);
+        // }
         // }
 
         // if (!relationToDelete.isEmpty()) {
 
-        //     Command cmd = DeleteCommand.delete(relationToDelete, true, false);
-        //     UndoRedoHandler.getInstance().add(cmd);
+        // Command cmd = DeleteCommand.delete(relationToDelete, true, false);
+        // UndoRedoHandler.getInstance().add(cmd);
 
         // }
 
@@ -250,17 +260,430 @@ public class MagicCutterAction extends JosmAction {
     public void processRelation(Relation relation, Way selectedWay, String offsetMode) {
 
         intersectionNodes = new ArrayList<>();
+        crossingInnerWays = new ArrayList<>();
+        crossingOuterWays = new ArrayList<>();
+        createdWays = new ArrayList<>();
 
         tryToCutRelationWithWayV2(relation, selectedWay, offsetMode);
         tryToCutRelationWithWayV2(relation, selectedWay, "negative");
         // tryToCutRelationWithWay(relation, selectedWay, "first", offsetMode);
         // tryToCutRelationWithWay(relation, selectedWay, "last", offsetMode);
+        List<Way> outer = splitRingAndGetWaysForDeletion(relation, "outer");
+        List<Way> inner = splitRingAndGetWaysForDeletion(relation, "inner");
+
+        reconstructRelation(relation, outer, inner);
 
     }
 
+    void reconstructRelation(Relation relation, List<Way> outer, List<Way> inner) {
+
+        Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
+        waysToDelete.addAll(outer);
+        waysToDelete.addAll(inner);
+
+        // delete ways
+        if (!waysToDelete.isEmpty()) {
+
+            Command cmd = DeleteCommand.delete(waysToDelete, true, false);
+            UndoRedoHandler.getInstance().add(cmd);
+
+        }
+
+        Collection<Way> relationMemberWays = new ArrayList<>(relation.getMemberPrimitives(Way.class));
+
+        relationMemberWays.addAll(createdWays);
+
+        createRelation(relation, relationMemberWays);
+
+    }
+
+    void createRelation(Relation r, Collection<Way> relationMemberWays) {
+        MultipolygonBuilder mpc = new MultipolygonBuilder();
+        String error = mpc.makeFromWays(relationMemberWays);
+
+        if (error != null) {
+            JOptionPane.showMessageDialog(MainApplication.getMainFrame(), error);
+            return;
+        }
+
+        boolean relationReused = false;
+        List<Command> commands = new ArrayList<>();
+        List<OsmPrimitive> newSelection = new ArrayList<>();
+
+        for (JoinedPolygon p : mpc.outerWays) {
+
+            ArrayList<JoinedPolygon> myInnerWays = new ArrayList<>();
+            for (JoinedPolygon i : mpc.innerWays) {
+                // if the first point of any inner ring is contained in this
+                // outer ring, then this inner ring belongs to us. This
+                // assumption only works if multipolygons have valid geometries
+                EastNorth en = i.ways.get(0).firstNode().getEastNorth();
+                if (p.area.contains(en.east(), en.north())) {
+                    myInnerWays.add(i);
+                }
+            }
+
+            if (!myInnerWays.isEmpty()) {
+                // this ring has inner rings, so we leave a multipolygon in
+                // place and don't reconstruct the rings.
+                Relation n;
+                if (relationReused) {
+                    n = new Relation();
+                    n.setKeys(r.getKeys());
+                } else {
+                    n = new Relation(r);
+                    n.setMembers(null);
+                }
+                for (Way w : p.ways) {
+                    n.addMember(new RelationMember("outer", w));
+                }
+                for (JoinedPolygon i : myInnerWays) {
+                    for (Way w : i.ways) {
+                        n.addMember(new RelationMember("inner", w));
+                    }
+                }
+                if (relationReused) {
+                    commands.add(new AddCommand(ds, n));
+                } else {
+                    relationReused = true;
+                    commands.add(new ChangeCommand(r, n));
+                }
+                newSelection.add(n);
+                continue;
+            }
+
+            // move all tags from relation and common tags from ways
+            // start with all tags from first way but only if area tags are present
+            Map<String, String> tags = p.ways.get(0).getKeys();
+            if (!p.ways.get(0).hasAreaTags()) {
+                tags.clear();
+            }
+            List<OsmPrimitive> relations = p.ways.get(0).getReferrers();
+            Set<String> noTags = new HashSet<>(r.keySet());
+            for (int i = 1; i < p.ways.size(); i++) {
+                Way w = p.ways.get(i);
+                for (String key : w.keySet()) {
+                    String value = w.get(key);
+                    if (!noTags.contains(key) && tags.containsKey(key) && !tags.get(key).equals(value)) {
+                        tags.remove(key);
+                        noTags.add(key);
+                    }
+                }
+                List<OsmPrimitive> referrers = w.getReferrers();
+                relations.removeIf(osmPrimitive -> !referrers.contains(osmPrimitive));
+            }
+            tags.putAll(r.getKeys());
+            tags.remove("type");
+
+            // then delete ways that are not relevant (do not take part in other relations
+            // or have strange tags)
+            Way candidateWay = null;
+            for (Way w : p.ways) {
+                if (w.getReferrers().size() == 1) {
+                    // check tags that remain
+                    Set<String> keys = new HashSet<>(w.keySet());
+                    keys.removeAll(tags.keySet());
+                    IRRELEVANT_KEYS.forEach(keys::remove);
+                    if (keys.isEmpty()) {
+                        if (candidateWay == null) {
+                            candidateWay = w;
+                        } else {
+                            if (candidateWay.isNew() && !w.isNew()) {
+                                // prefer ways that are already in the database
+                                Way tmp = w;
+                                w = candidateWay;
+                                candidateWay = tmp;
+                            }
+                            commands.add(new DeleteCommand(w));
+                        }
+                    }
+                }
+            }
+
+            // take the first way, put all nodes into it, making it a closed polygon
+            Way result = candidateWay == null ? new Way() : new Way(candidateWay);
+            result.setNodes(p.nodes);
+            result.addNode(result.firstNode());
+            result.setKeys(tags);
+            newSelection.add(candidateWay == null ? result : candidateWay);
+            commands.add(candidateWay == null ? new AddCommand(ds, result) : new ChangeCommand(candidateWay, result));
+        }
+
+        UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Reconstruct polygons from relation {0}",
+                r.getDisplayName(DefaultNameFormatter.getInstance())), commands));
+        ds.setSelected(newSelection);
+
+    }
+
+    List<Way> splitRingAndGetWaysForDeletion(Relation relation, String role) {
+
+        List<Node> ringIntersectionNodes = new ArrayList<>();
+        Way wayFromRing = null;
+        List<JoinedPolygon> checkRings = new ArrayList<>();
+        JoinedPolygon foundRing = null;
+        List<Way> ringDeletionWays = new ArrayList<>();
+
+        if (role.equals("outer")) {
+            wayFromRing = crossingOuterWays.get(0);
+        } else {
+            wayFromRing = crossingInnerWays.get(0);
+        }
+
+        // reconstruct multipolygo to fetch added Split nodes positions
+        Collection<Way> relationMemberWays = new ArrayList<>(relation.getMemberPrimitives(Way.class));
+        MultipolygonBuilder multipolygon = new MultipolygonBuilder();
+        String error = multipolygon.makeFromWays(relationMemberWays);
+
+        if (role.equals("outer")) {
+            checkRings = multipolygon.outerWays;
+        } else {
+            checkRings = multipolygon.innerWays;
+        }
+
+        for (JoinedPolygon ring : checkRings) {
+            // List<Way> outetWays = ;
+            if (ring.ways.contains(wayFromRing)) {
+                foundRing = ring;
+                break;
+            }
+        }
+
+        if (foundRing == null)
+            return null;
+
+        List<Node> ringNodes = foundRing.getNodes();
+
+        Way simpleSplitWay = null;
+        for (Node ringNode : ringNodes) {
+            if (intersectionNodes.contains(ringNode)) {
+                ringIntersectionNodes.add(ringNode);
+            }
+        }
+
+        for (Node ringIntersectionNode : ringIntersectionNodes) {
+
+            for (Way way : ringIntersectionNode.getParentWays()) {
+                if (foundRing.ways.contains(way)) {
+                    // split way
+                    if (simpleSplitWay == null) {
+                        simpleSplitWay = way;
+                    } else if (simpleSplitWay == way) {
+                        // ok
+                    } else {
+                        // collect
+                    }
+
+                }
+
+            }
+
+        }
+
+        if (simpleSplitWay != null) {
+
+            List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(simpleSplitWay,
+                    ringIntersectionNodes);
+
+            SplitWayCommand result = SplitWayCommand.splitWay(wayFromRing,
+                    wayChunks, Collections.emptyList());
+            List<Command> cmds = new LinkedList<>();
+            cmds.add(result);
+
+            if (!cmds.isEmpty()) {
+                UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
+                        cmds));
+                getLayerManager().getEditDataSet().setSelected(result.getNewSelection());
+            }
+
+            relationMemberWays = new ArrayList<>(relation.getMemberPrimitives(Way.class));
+            multipolygon.makeFromWays(relationMemberWays);
+
+            // todo
+            if (role.equals("outer")) {
+                checkRings = multipolygon.outerWays;
+            } else {
+                checkRings = multipolygon.innerWays;
+            }
+
+            for (JoinedPolygon checkRing : checkRings) {
+                // List<Way> outetWays = ;
+                if (checkRing.ways.contains(wayFromRing)) {
+                    foundRing = checkRing;
+                    break;
+                }
+            }
+
+            ringNodes = foundRing.getNodes();
+            // Pair<double[], Node[][]> distances =
+            // calculateDistancesBetweenNodesInClosedWay(ringNodes,
+            // ringIntersectionNodes.get(0), ringIntersectionNodes.get(1));
+
+            Pair<double[], Way[][]> checkedDistances = calculateDistancesBetweenWaysInClosedWay(foundRing.ways,
+                    ringIntersectionNodes.get(0), ringIntersectionNodes.get(1));
+
+            if (checkedDistances.a[0] < checkedDistances.a[1]) {
+                ringDeletionWays = Arrays.asList(checkedDistances.b[0]);
+            } else {
+                ringDeletionWays = Arrays.asList(checkedDistances.b[1]);
+            }
+
+        }
+
+        return ringDeletionWays;
+
+        // 2 outer nodes
+
+        // if (crossingOuterWays.size() == 1) {
+        // Way crossingOuterWay = crossingOuterWays.get(0);
+
+        // } else {
+        // for (Way way : crossingOuterWays) {
+
+        // }
+        // }
+
+    }
+
+    public Pair<double[], Way[][]> calculateDistancesBetweenWaysInClosedWay(List<Way> ways, Node node1, Node node2) {
+        Way[][] waysArray = new Way[2][];
+        double[] distances = new double[2];
+
+        // Find the indices of the target nodes within the list of nodes representing
+        // the closed way
+        int index1 = -1;
+        int index2 = -1;
+        for (int i = 0; i < ways.size(); i++) {
+            Way way = ways.get(i);
+            if (way.firstNode() == node1) {
+                index1 = i;
+            }
+            if (way.firstNode() == node2) {
+                index2 = i;
+            }
+        }
+
+        // Iterate over the ways in the closed way in both directions, calculating
+        // distances until reaching the target nodes
+        for (int direction = 0; direction < 2; direction++) {
+            int currentIndex = direction == 0 ? index1 : index2;
+            int targetIndex = direction == 0 ? index2 : index1;
+            double totalDistance = 0.0;
+            List<Way> waysTraversed = new ArrayList<>();
+
+            // Traverse the closed way in the specified direction
+            while (currentIndex != targetIndex) {
+                Way currentWay = ways.get(currentIndex);
+                waysTraversed.add(currentWay); // Collect the current way
+
+                currentIndex = (currentIndex + 1) % ways.size();
+            }
+
+            // Add the last way visited to waysTraversed
+            // waysTraversed.add(ways.get(targetIndex));
+
+            // Calculate the total distance traversed (e.g., sum of lengths of all ways)
+            for (Way way : waysTraversed) {
+                totalDistance += way.getLength();
+            }
+
+            // Store the total distance for the current direction
+            distances[direction] = totalDistance;
+            waysArray[direction] = waysTraversed.toArray(new Way[0]); // Convert the list of ways traversed to an array
+        }
+
+        return new Pair<>(distances, waysArray);
+    }
+
+    public Pair<double[], Node[][]> calculateDistancesBetweenNodesInClosedWay(List<Node> nodes, Node node1,
+            Node node2) {
+        Node[][] nodesArray = new Node[2][];
+        double[] distances = new double[2];
+
+        // Find the indices of the target nodes within the list of nodes representing
+        // the closed way
+        int index1 = nodes.indexOf(node1);
+        int index2 = nodes.indexOf(node2);
+
+        // Iterate over the nodes in the closed way in both directions, calculating
+        // distances until reaching the target nodes
+        for (int direction = 0; direction < 2; direction++) {
+            int currentIndex = direction == 0 ? index1 : index2;
+            int targetIndex = direction == 0 ? index2 : index1;
+            double totalDistance = 0.0;
+            List<Node> nodesTraversed = new ArrayList<>();
+
+            // Traverse the closed way in the specified direction
+            while (currentIndex != targetIndex) {
+                Node currentNode = nodes.get(currentIndex);
+                nodesTraversed.add(currentNode); // Collect the current node
+
+                Node nextNode = nodes.get((currentIndex + 1) % nodes.size()); // Wrap around to the beginning if at the
+                                                                              // end
+
+                // Calculate the distance between the current node and the next node
+                double distance = Geometry.getDistance(currentNode, nextNode);
+
+                // Accumulate the distance
+                totalDistance += distance;
+
+                // Move to the next node
+                currentIndex = (currentIndex + 1) % nodes.size();
+            }
+            // Add the last node visited to nodesTraversed
+            nodesTraversed.add(nodes.get(targetIndex));
+
+            // Store the total distance for the current direction
+            distances[direction] = totalDistance;
+            nodesArray[direction] = nodesTraversed.toArray(new Node[0]); // Convert the list of nodes traversed to an
+                                                                         // array
+        }
+
+        return new Pair<>(distances, nodesArray);
+    }
+
+    // public double[] calculateDistancesBetweenNodesInClosedWay(List<Node> nodes,
+    // Node node1, Node node2) {
+    // double[] distances = new double[2];
+
+    // // Find the indices of the target nodes within the list of nodes representing
+    // // the closed way
+    // int index1 = nodes.indexOf(node1);
+    // int index2 = nodes.indexOf(node2);
+
+    // // Iterate over the nodes in the closed way in both directions, calculating
+    // // distances until reaching the target nodes
+    // for (int direction = 0; direction < 2; direction++) {
+    // int currentIndex = direction == 0 ? index1 : index2;
+    // int targetIndex = direction == 0 ? index2 : index1;
+    // double totalDistance = 0.0;
+
+    // // Traverse the closed way in the specified direction
+    // while (currentIndex != targetIndex) {
+    // Node currentNode = nodes.get(currentIndex);
+    // Node nextNode = nodes.get((currentIndex + 1) % nodes.size()); // Wrap around
+    // to the beginning if at the
+    // // end
+
+    // // Calculate the distance between the current node and the next node
+    // double distance = Geometry.getDistance(currentNode, nextNode);
+
+    // // Accumulate the distance
+    // totalDistance += distance;
+
+    // // Move to the next node
+    // currentIndex = (currentIndex + 1) % nodes.size();
+    // }
+
+    // // Store the total distance for the current direction
+    // distances[direction] = totalDistance;
+    // }
+
+    // return distances;
+    // }
+
     void tryToCutRelationWithWayV2(Relation relation, Way selectedWay, String offsetMode) {
 
-        Way offsetWay = createOffsetWay(selectedWay, offsetMode);
+        Way offsetWay = createOffsetWayV2(selectedWay, offsetMode);
         Logging.info("offsetWay created");
         Command addOffsetWayCommand = createAddWayCommand(offsetWay);
         UndoRedoHandler.getInstance().add(addOffsetWayCommand);
@@ -295,6 +718,9 @@ public class MagicCutterAction extends JosmAction {
 
         crossingOuterWay = getRelationMemberWayFithRole(relation, newIntersectedWays, "outer");
         crossingInnerWay = getRelationMemberWayFithRole(relation, newIntersectedWays, "inner");
+
+        crossingOuterWays.add(crossingOuterWay);
+        crossingInnerWays.add(crossingInnerWay);
 
         // 3 if not, check if line crosses polygon fully, proceed with standard to find
         // next way for offset if not fully crossed
@@ -358,22 +784,27 @@ public class MagicCutterAction extends JosmAction {
 
             }
 
-            //delete unneeded ways
+            // delete unneeded ways
             Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
 
             Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
             waysToDelete.add(offsetWay);
-            
 
             for (OsmPrimitive element : results) {
                 if (element instanceof Way) {
 
                     Way wayElement = (Way) element;
-                    if (wayElement.firstNode() == offsetWay.firstNode() || wayElement.lastNode() == offsetWay.lastNode()){
+                    // if (wayElement.firstNode() == offsetWay.firstNode()
+                    // || wayElement.lastNode() == offsetWay.lastNode()) {
 
-                        //
+                    if (intersectionNodes.contains(wayElement.firstNode())
+                            && intersectionNodes.contains(wayElement.lastNode())) {
+                        createdWays.add(wayElement);
+                    } else {
                         waysToDelete.add(wayElement);
                     }
+
+                    // }
 
                 }
 
@@ -967,6 +1398,80 @@ public class MagicCutterAction extends JosmAction {
         offsetWay.setNodes(offsetNodes);
 
         return offsetWay;
+
+    }
+
+    public Way createOffsetWayV2(Way sourceWay, String mode) {
+
+        // Offset distance in meters
+        double offsetDistance = 0.0001;
+
+        if (mode.equals("negative")) {
+            offsetDistance = offsetDistance * -1;
+        }
+
+        List<Node> sourceNodes = sourceWay.getNodes();
+        List<Node> offsetNodes = new ArrayList<>();
+
+        // Calculate the heading from start to end points
+        double heading = calculateHeading(sourceNodes.get(0).getCoor(),
+        sourceNodes.get(sourceNodes.size() - 1).getCoor());
+
+        // Offset the line by 90 degrees from the calculated heading
+        double offsetHeading = (heading + 90) % 360;
+
+        for (Node originalNode : sourceNodes) {
+        // Offset the coordinates based on the new heading
+        double newLat = originalNode.getCoor().lat() +
+        Math.cos(Math.toRadians(offsetHeading)) * offsetDistance;
+        double newLon = originalNode.getCoor().lon() +
+        Math.sin(Math.toRadians(offsetHeading)) * offsetDistance;
+
+        // Create a new node with the offset coordinates
+
+        Node offsetNode = new Node(new LatLon(newLat, newLon));
+        offsetNodes.add(offsetNode);
+
+        }
+
+        // advanced offset
+        // EastNorth centerCoordinates = Geometry.getCentroid(sourceNodes);
+
+        // for (Node originalNode : sourceNodes) {
+        //     Node offsetNode = new Node(originalNode, true);
+        //     moveNodeInDirection(offsetNode, centerCoordinates, 0.01);
+        //     offsetNodes.add(offsetNode);
+        // }
+
+        // Create a new way with the offset nodes
+        Way offsetWay = new Way();
+
+        offsetWay.setKeys(tags);
+        offsetWay.setNodes(offsetNodes);
+
+        return offsetWay;
+
+    }
+
+    public static void moveNodeInDirection(Node node, EastNorth targetEN, double distance) {
+        // Get the current East-North coordinates of the node
+        EastNorth currentEN = node.getEastNorth();
+
+        // Calculate the direction vector from the current node to the target East-North
+        // coordinate
+        double dx = targetEN.getX() - currentEN.getX();
+        double dy = targetEN.getY() - currentEN.getY();
+
+        // Scale the direction vector to the desired distance
+        double newX = currentEN.getX() + dx * distance;
+        double newY = currentEN.getY() + dy * distance;
+
+        // Convert the new East-North coordinates back to latitude and longitude
+        double lat = newY;
+        double lon = newX;
+
+        // Set the new coordinates to the existing node
+        node.setEastNorth(new EastNorth(lon, lat));
 
     }
 

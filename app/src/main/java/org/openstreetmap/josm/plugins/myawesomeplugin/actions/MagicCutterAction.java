@@ -21,6 +21,14 @@ import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.operation.buffer.BufferParameters;
+import org.locationtech.jts.operation.buffer.OffsetCurve;
+import org.locationtech.jts.operation.buffer.OffsetCurveBuilder;
+//import org.locationtech.jts.geom.Geometry;
+//import org.openstreetmap.gui.jmapviewer.Coordinate;
 import org.openstreetmap.josm.actions.ExpertToggleAction;
 import org.openstreetmap.josm.actions.JosmAction;
 import org.openstreetmap.josm.actions.UnGlueAction;
@@ -97,6 +105,8 @@ import java.util.concurrent.Callable;
  * Extends current selection by selecting nodes on all touched ways
  */
 public class MagicCutterAction extends JosmAction {
+
+    private org.locationtech.jts.geom.Geometry jtsGeometry;
 
     private DataSet ds;
     Collection<Way> allWays;
@@ -683,19 +693,19 @@ public class MagicCutterAction extends JosmAction {
 
     void tryToCutRelationWithWayV2(Relation relation, Way selectedWay, String offsetMode) {
 
-        Way offsetWay = createOffsetWayV2(selectedWay, offsetMode);
+        Way offsetWay = createOffsetWay4(selectedWay, offsetMode);
         Logging.info("offsetWay created");
         Command addOffsetWayCommand = createAddWayCommand(offsetWay);
         UndoRedoHandler.getInstance().add(addOffsetWayCommand);
         Logging.info("offsetWay added to dataset: " + offsetWay.getId());
 
         // 1 check start/end point ouside outer polygon
-        boolean firstOutside = checkNodeWithinMultipolygon(relation, offsetWay.firstNode());
-        boolean latstOutside = checkNodeWithinMultipolygon(relation, offsetWay.lastNode());
+        boolean firstOutside = checkNodeOutsideMultipolygon(relation, offsetWay.firstNode());
+        boolean latstOutside = checkNodeOutsideMultipolygon(relation, offsetWay.lastNode());
 
         Node startingNode = null;
 
-        if (firstOutside && latstOutside) {
+        if (!firstOutside && !latstOutside) {
             // error
         } else if (firstOutside) {
             startingNode = offsetWay.firstNode();
@@ -830,6 +840,27 @@ public class MagicCutterAction extends JosmAction {
 
     }
 
+    private boolean checkNodeOutsideMultipolygon(Relation relation, Node endNode) {
+        // Check if created ways start and end points a within relation multipolygon
+
+        System.out.println("Checking if Node is outside polygon: " + endNode.getUniqueId());
+        Collection<OsmPrimitive> primitivesInsideMultipolygon = NodeWayUtils
+                .selectAllInside(Collections.singletonList(relation), this.ds, false);
+
+        for (OsmPrimitive osmPrimitive : primitivesInsideMultipolygon) {
+            if (osmPrimitive instanceof Node) {
+
+                Node node = (Node) osmPrimitive;
+                if (node.getUniqueId() == endNode.getUniqueId()) {
+                    System.out.println("Node is outside polygon: " + endNode.getUniqueId());
+                    return false;
+                }
+
+            }
+        }
+        return true;
+    }
+
     private Way getRelationMemberWayFithRole(Relation relation, Set<Way> intersectedWays, String role) {
 
         List<OsmPrimitive> membersWithRole = new ArrayList<>(relation.findRelationMembers(role));
@@ -847,159 +878,8 @@ public class MagicCutterAction extends JosmAction {
 
     }
 
-    // private boolean isOuterMemberOfMultipolygon(OsmPrimitive ref) {
-    // return ref instanceof Relation
-    // && ref.isSelected()
-    // && ((Relation) ref).isMultipolygon()
-    // && ((Relation) ref).getMembersFor(Collections.singleton(this)).stream()
-    // .anyMatch(rm -> "outer".equals(rm.getRole()));
-    // }
-
-    // public void cutWithOffset(Collection<Way> selectedWays, String offsetMode) {
-
-    // Collection<Way> allWays = ds.getWays();
-    // Set<Way> newIntersectedWays = new HashSet<>();
-    // // Check ways that intersects with selected Way
-    // NodeWayUtils.addWaysIntersectingWays(allWays, selectedWays,
-    // newIntersectedWays);
-
-    // // Check if intersected Way is part of Relation
-    // Set<Relation> parentRelations =
-    // OsmPrimitive.getParentRelations(newIntersectedWays);
-
-    // for (Relation relation : parentRelations) {
-    // // Check Relation type is Multipolygon
-    // if ("multipolygon".equals(relation.get("type"))) {
-
-    // // Check if all memebers are downloaded
-    // if (relation.getIncompleteMembers().size() > 0) {
-
-    // DownloadPrimitivesTask downTask = new DownloadPrimitivesTask(
-    // MainApplication.getLayerManager().getEditLayer(),
-    // Collections.singletonList(relation), true);
-
-    // // Runnable runAfterTask = new Runnable() {
-    // // public void run() {
-    // // // this is not strictly necessary because of the type of executor service
-    // // // Main.worker is initialized with, but it doesn't harm either
-    // // //
-    // // try {
-    // // future.get();
-    // // Logging.info("Download co try");
-
-    // // condition.set(true);
-    // // } catch (InterruptedException | ExecutionException e) {
-
-    // // e.printStackTrace();
-    // // }
-    // // }
-    // // };
-    // // MainApplication.worker.submit(runAfterTask);
-
-    // Thread appThread = new Thread() {
-    // public void run() {
-    // try {
-    // SwingUtilities.invokeLater(downTask);
-    // } catch (Exception e) {
-    // e.printStackTrace();
-    // }
-    // System.out.println("Finished on " + Thread.currentThread());
-    // }
-    // };
-    // appThread.start();
-
-    // // AtomicBoolean condition = new AtomicBoolean(false);
-
-    // // // Set<OsmPrimitive> ret = new HashSet<>(relation.getIncompleteMembers());
-
-    // // // DownloadOsmTask task = new DownloadOsmTask();
-
-    // // // DownloadRelationTask
-    // // // DownloadRelationMemberTask
-
-    // // DownloadPrimitivesTask downTask = new DownloadPrimitivesTask(
-    // // MainApplication.getLayerManager().getEditLayer(),
-    // // Collections.singletonList(relation), true);
-
-    // // // Future<?> future = MainApplication.worker
-    // // // .submit(new
-    // // //
-    // DownloadPrimitivesTask(MainApplication.getLayerManager().getEditLayer(),
-    // // // Collections.singletonList(relation), true));
-
-    // // // DownloadRelationTask downTask = new DownloadRelationTask(
-    // // // Collections.singletonList(relation),
-    // // // MainApplication.getLayerManager().getEditLayer());
-
-    // // // downTask.canRunInBackground()
-    // // // Object lock = new Object();
-
-    // // Future<?> future = MainApplication.worker.submit(downTask);
-
-    // // Runnable runAfterTask = new Runnable() {
-    // // public void run() {
-    // // // this is not strictly necessary because of the type of executor service
-    // // // Main.worker is initialized with, but it doesn't harm either
-    // // //
-    // // try {
-    // // future.get();
-    // // Logging.info("Download co try");
-
-    // // condition.set(true);
-    // // } catch (InterruptedException | ExecutionException e) {
-
-    // // e.printStackTrace();
-    // // }
-    // // }
-    // // };
-    // // MainApplication.worker.submit(runAfterTask);
-
-    // // // Thread thr = new Thread(runAfterTask);
-    // // // thr.start();
-
-    // // // Thread thr = new Thread(() -> {
-    // // // // Do some background task here
-
-    // // // // Update the UI on the EDT using SwingUtilities.invokeLater()
-
-    // // // SwingUtilities.invokeLater(runAfterTask);
-
-    // // // });
-    // // // thr.start();
-
-    // // while (!condition.get()) {
-    // // System.out.println("Waiting for condition to be true...");
-    // // try {
-    // // Thread.sleep(500);
-    // // } catch (InterruptedException e) {
-    // // // TODO Auto-generated catch block
-    // // e.printStackTrace();
-    // // }
-
-    // // // Logging.info("cool!");
-    // // }
-
-    // Logging.info("Runaway!");
-
-    // } else {
-    // processRelationOld(relation, selectedWays, offsetMode);
-    // }
-
-    // }
-
-    // }
-
-    // }
-
-    // public void processRelationOld(Relation relation, Collection<Way>
-    // selectedWays, String offsetMode) {
-
-    // processWay(relation, selectedWays, "first", offsetMode);
-    // processWay(relation, selectedWays, "last", offsetMode);
-
-    // }
-
     public void tryToCutRelationWithWay(Relation relation, Way selectedWay, String direction, String mode) {
+        //First simple method
         Way sourceWay = null;
 
         do {
@@ -1327,8 +1207,10 @@ public class MagicCutterAction extends JosmAction {
         return mergedWay;
     }
 
-    private boolean checkNodeWithinMultipolygon(Relation relation, Node fNode) {
+    private boolean checkNodeWithinMultipolygon(Relation relation, Node endNode) {
         // Check if created ways start and end points a within relation multipolygon
+
+        System.out.println("Checking if Node is outside polygon: " + endNode.getUniqueId());
         Collection<OsmPrimitive> primitivesInsideMultipolygon = NodeWayUtils
                 .selectAllInside(Collections.singletonList(relation), this.ds, false);
 
@@ -1336,10 +1218,8 @@ public class MagicCutterAction extends JosmAction {
             if (osmPrimitive instanceof Node) {
 
                 Node node = (Node) osmPrimitive;
-                if (node.getCoor().equals(fNode.getCoor())) {
-                    // ds.addSelected(osmPrimitive);
-                    System.out.println("Found Node: " + node.getId());
-
+                if (node.getCoor().equals(endNode.getCoor())) {
+                    System.out.println("Node is outside polygon: " + endNode.getUniqueId());
                     return true;
                 }
 
@@ -1358,6 +1238,44 @@ public class MagicCutterAction extends JosmAction {
             }
         }
         return null; // No connected way with the same tags found
+    }
+
+    public Way createOffsetWay4(Way sourceWay, String mode) {
+        // Offset distance in meters
+        double offsetDistance = 0.0001;
+
+        if (mode.equals("negative")) {
+            offsetDistance = -offsetDistance;
+        }
+
+        List<Node> sourceNodes = sourceWay.getNodes();
+
+        // Convert JOSM nodes to JTS Coordinate array
+        Coordinate[] coordinates = new Coordinate[sourceNodes.size()];
+        for (int i = 0; i < sourceNodes.size(); i++) {
+            Node node = sourceNodes.get(i);
+            coordinates[i] = new Coordinate(node.getCoor().lon(), node.getCoor().lat());
+        }
+
+        // Create a JTS LineString from the coordinates
+        GeometryFactory geometryFactory = new GeometryFactory();
+        LineString lineString = geometryFactory.createLineString(coordinates);
+
+        org.locationtech.jts.geom.Geometry curve = OffsetCurve.getCurve(lineString, offsetDistance);
+        // Convert the resulting polygon back to JOSM nodes
+        List<Node> offsetNodes = new ArrayList<>();
+        for (Coordinate coordinate : curve.getCoordinates()) {
+            LatLon latLon = new LatLon(coordinate.y, coordinate.x);
+            Node node = new Node(latLon);
+            offsetNodes.add(node);
+        }
+
+        // Create a new way with the offset nodes
+        Way offsetWay = new Way();
+        // offsetWay.setKeys(sourceWay.getKeys());
+        offsetWay.setNodes(offsetNodes);
+
+        return offsetWay;
     }
 
     public Way createOffsetWay(Way sourceWay, String mode) {
@@ -1390,58 +1308,6 @@ public class MagicCutterAction extends JosmAction {
             offsetNodes.add(offsetNode);
 
         }
-
-        // Create a new way with the offset nodes
-        Way offsetWay = new Way();
-
-        offsetWay.setKeys(tags);
-        offsetWay.setNodes(offsetNodes);
-
-        return offsetWay;
-
-    }
-
-    public Way createOffsetWayV2(Way sourceWay, String mode) {
-
-        // Offset distance in meters
-        double offsetDistance = 0.0001;
-
-        if (mode.equals("negative")) {
-            offsetDistance = offsetDistance * -1;
-        }
-
-        List<Node> sourceNodes = sourceWay.getNodes();
-        List<Node> offsetNodes = new ArrayList<>();
-
-        // Calculate the heading from start to end points
-        double heading = calculateHeading(sourceNodes.get(0).getCoor(),
-        sourceNodes.get(sourceNodes.size() - 1).getCoor());
-
-        // Offset the line by 90 degrees from the calculated heading
-        double offsetHeading = (heading + 90) % 360;
-
-        for (Node originalNode : sourceNodes) {
-        // Offset the coordinates based on the new heading
-        double newLat = originalNode.getCoor().lat() +
-        Math.cos(Math.toRadians(offsetHeading)) * offsetDistance;
-        double newLon = originalNode.getCoor().lon() +
-        Math.sin(Math.toRadians(offsetHeading)) * offsetDistance;
-
-        // Create a new node with the offset coordinates
-
-        Node offsetNode = new Node(new LatLon(newLat, newLon));
-        offsetNodes.add(offsetNode);
-
-        }
-
-        // advanced offset
-        // EastNorth centerCoordinates = Geometry.getCentroid(sourceNodes);
-
-        // for (Node originalNode : sourceNodes) {
-        //     Node offsetNode = new Node(originalNode, true);
-        //     moveNodeInDirection(offsetNode, centerCoordinates, 0.01);
-        //     offsetNodes.add(offsetNode);
-        // }
 
         // Create a new way with the offset nodes
         Way offsetWay = new Way();

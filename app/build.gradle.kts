@@ -21,6 +21,8 @@ dependencies {
 
     // This dependency is used by the application.
     implementation("com.google.guava:guava:31.1-jre")
+
+    implementation("org.locationtech.jts:jts-core:1.19.0")
 }
 
 // application {

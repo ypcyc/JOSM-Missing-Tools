@@ -54,7 +54,7 @@ public class MagicUnlink extends JosmAction {
      * Constructs a new {@code RunMagic}.
      */
     public MagicUnlink() {
-        super(tr("Magic Poligon Unlink"), "addintersect", tr("Add missing nodes at intersections of selected ways."),
+        super(tr("Magic Poligon Unlink"), "unglue", tr("Add missing nodes at intersections of selected ways."),
                 Shortcut.registerShortcut("tools:addintersect", tr("More tools: {0}", tr("Add nodes at intersections")),
                         KeyEvent.VK_M, Shortcut.SHIFT),
                 true);

@@ -27,7 +27,6 @@ import javax.swing.JOptionPane;
 import org.openstreetmap.josm.actions.CombineWayAction;
 import org.openstreetmap.josm.actions.mapmode.MapMode;
 import org.openstreetmap.josm.actions.mapmode.ParallelWays;
-import org.openstreetmap.josm.actions.mapmode.SelectAction;
 import org.openstreetmap.josm.command.AddCommand;
 import org.openstreetmap.josm.command.ChangeCommand;
 import org.openstreetmap.josm.command.Command;
@@ -188,11 +187,13 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
      * @param mapFrame Map frame
      */
     public MagicCutAction(MapFrame mapFrame) {
-        super(tr("Parallel"), "parallel", tr("Make parallel copies of ways"),
+        super(tr("Polygon Cut"),
+                "polycut",
+                tr("Cut Polygon by parallel copies of ways"),
                 Shortcut.registerShortcut("mapmode:parallel", tr("Mode: {0}",
-                        tr("Parallel")), KeyEvent.VK_P, Shortcut.SHIFT),
+                        tr("Polygon Cut")), KeyEvent.VK_Y, Shortcut.DIRECT),
                 ImageProvider.getCursor("normal", "parallel"));
-        setHelpId(ht("/Action/Parallel"));
+        // setHelpId(ht("/Action/Parallel"));
         mv = mapFrame.mapView;
     }
 

@@ -106,8 +106,6 @@ import java.util.concurrent.Callable;
  */
 public class MagicCutterAction extends JosmAction {
 
-    private org.locationtech.jts.geom.Geometry jtsGeometry;
-
     private DataSet ds;
     Collection<Way> allWays;
     Way selectedWay;
@@ -125,7 +123,8 @@ public class MagicCutterAction extends JosmAction {
             5 * 60);
 
     public MagicCutterAction() {
-        super(tr("Magic Multipolygon Cutter"), "multipolygon", tr("Select intersecting ways"),
+        super( tr("Magic Multipolygon Cutter"),
+                "multipolygon", tr("Select intersecting ways"),
                 Shortcut.registerShortcut("tools:intway", tr("Selection: {0}", tr("Intersecting ways")),
                         KeyEvent.VK_I, Shortcut.DIRECT),
                 true);
@@ -273,6 +272,7 @@ public class MagicCutterAction extends JosmAction {
         crossingInnerWays = new ArrayList<>();
         crossingOuterWays = new ArrayList<>();
         createdWays = new ArrayList<>();
+        newRelations = new HashSet<>();
 
         tryToCutRelationWithWayV2(relation, selectedWay, offsetMode);
         tryToCutRelationWithWayV2(relation, selectedWay, "negative");
@@ -879,7 +879,7 @@ public class MagicCutterAction extends JosmAction {
     }
 
     public void tryToCutRelationWithWay(Relation relation, Way selectedWay, String direction, String mode) {
-        //First simple method
+        // First simple method
         Way sourceWay = null;
 
         do {

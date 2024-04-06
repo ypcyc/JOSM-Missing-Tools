@@ -24,6 +24,8 @@ import java.util.stream.Stream;
 
 import javax.swing.JOptionPane;
 
+//import org.jgrapht.alg.DijkstraShortestPath;
+import org.jgrapht.graph.DirectedWeightedMultigraph;
 import org.openstreetmap.josm.actions.CombineWayAction;
 import org.openstreetmap.josm.actions.mapmode.MapMode;
 import org.openstreetmap.josm.actions.mapmode.ParallelWays;
@@ -63,7 +65,11 @@ import org.openstreetmap.josm.gui.draw.MapViewPath;
 import org.openstreetmap.josm.gui.layer.AbstractMapViewPaintable;
 import org.openstreetmap.josm.gui.layer.Layer;
 import org.openstreetmap.josm.gui.util.ModifierExListener;
+import org.openstreetmap.josm.plugins.myawesomeplugin.utils.DijkstraData;
+import org.openstreetmap.josm.plugins.myawesomeplugin.utils.DijkstraData.NodeConnectException;
 import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
+import org.openstreetmap.josm.plugins.myawesomeplugin.utils.OsmEdge;
+import org.openstreetmap.josm.plugins.myawesomeplugin.utils.RoutingNode;
 import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.CheckParameterUtil;
 import org.openstreetmap.josm.tools.Geometry;
@@ -73,12 +79,16 @@ import org.openstreetmap.josm.tools.Pair;
 import org.openstreetmap.josm.tools.Shortcut;
 import org.openstreetmap.josm.tools.UserCancelException;
 
+import java.util.*;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Arrays;
 import java.awt.geom.Area;
 import java.util.Iterator;
+import java.util.HashMap;
+import org.jgrapht.Graph;
+import org.jgrapht.alg.DijkstraShortestPath;
 
 /**
  * MapMode for making parallel ways.
@@ -179,6 +189,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
     private List<Node> intersectionNodes;
     private List<Way> createdWays;
     Set<Relation> newRelations;
+    private Graph<Node, OsmEdge> graph;
 
     private static final List<String> IRRELEVANT_KEYS = Arrays.asList("source", "created_by", "note");
 
@@ -354,6 +365,68 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
     }
 
+    // public List<Way> findPath(Node startNode, Node targetNode, List<Way> ways) {
+    // // Initialize a set to keep track of visited nodes
+    // Set<Node> visited = new HashSet<>();
+
+    // // Initialize a queue for breadth-first search
+    // Queue<Node> queue = new LinkedList<>();
+    // queue.offer(startNode);
+
+    // // Initialize a map to keep track of parent nodes for constructing the path
+    // Map<Node, Node> parentMap = new HashMap<>();
+    // parentMap.put(startNode, null);
+
+    // // Perform breadth-first search until the target node is found
+    // while (!queue.isEmpty()) {
+    // Node currentNode = queue.poll();
+    // if (currentNode.equals(targetNode)) {
+    // break; // Target node found, exit the loop
+    // }
+
+    // // Explore neighbors of the current node
+    // List<Way> connectedWays = getConnectedWays(currentNode, ways);
+    // for (Way way : connectedWays) {
+    // List<Node> wayNodes = way.getNodes();
+    // for (Node neighborNode : wayNodes) {
+    // if (!visited.contains(neighborNode)) {
+    // queue.offer(neighborNode);
+    // parentMap.put(neighborNode, currentNode);
+    // visited.add(neighborNode);
+    // }
+    // }
+    // }
+    // }
+
+    // // Reconstruct the path from the parent map
+    // List<Way> path = new ArrayList<>();
+    // Node currentNode = targetNode;
+    // while (currentNode != null) {
+    // Node parentNode = parentMap.get(currentNode);
+    // if (parentNode != null) {
+    // // Find the way connecting the current node and its parent
+    // List<Way> connectedWays = getConnectedWays(currentNode, ways);
+    // for (Way way : connectedWays) {
+    // if (way.getNodes().contains(parentNode)) {
+    // path.add(way);
+    // break;
+    // }
+    // }
+    // }
+    // currentNode = parentNode;
+    // }
+
+    // // Reverse the path to get it from start to end
+    // Collections.reverse(path);
+
+    // return path;
+    // }
+
+    private double calculateDistance(Node node1, Node node2) {
+        // Implement your distance calculation logic here
+        return 0.0; // Dummy implementation, replace with your actual distance calculation
+    }
+
     void performCheck() {
 
         if (ctrl) {
@@ -374,58 +447,312 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
             List<Way> waysCollected = new ArrayList<>();
             List<Way> checkedWays = new ArrayList<>();
 
-            checkNodeInWays(secondNode, ways, level, waysCollected, checkedWays);
+            List<Way> ways2 = new ArrayList<>(ds.getWays());
+
+            // List<Way> path = findPath(firstNode, secondNode, ways2);
+
+            // checkNodeInWays(firstNode, secondNode, checkedWays);
+
+            
+
+            List<Node> nnn = new ArrayList<>(selectedNodes);
+            List<OsmEdge> listedge = applyAlgorithm(nnn);
+
+            if (waysCollected.size() > 0) {
+                List<OsmPrimitive> primitives = new ArrayList<>();
+                primitives.addAll(waysCollected);
+                primitives.addAll(selectedNodes);
+
+                ds.setSelected(primitives);
+            }
         }
     }
 
-    private Way checkNodeInWays(Node node, List<Way> ways, int level, List<Way> waysCollected, List<Way> checkedWays) {
+    public void createGraph() {
+        Logging.trace("Creating Graph...");
+        graph = new DirectedWeightedMultigraph<>(OsmEdge.class);
+        //rgDelegator = new RoutingGraphDelegator(graph);
+        //rgDelegator.setRouteType(this.routeType);
+        // iterate all ways and segments for all nodes:
+        for (Way way : ds.getWays()) {
 
-        if (level > 5)
-            return null;
+            // skip way if not suitable for routing.
+            if (way == null || way.isDeleted() 
+                    || way.getNodesCount() == 0) continue;
 
-        Way foundWay = null;
-
-        for (Way way : ways) {
+            // INIT
+            Node from = null;
+            Node to = null;
             List<Node> nodes = way.getNodes();
+            int nodesCount = nodes.size();
 
-            if (nodes.contains(node)) {
-                foundWay = way;
+            /*
+             * Assume node is A B C D E. The procedure should be
+             *
+             *  case 1 - bidirectional ways:
+             *  1) Add vertex A B C D E
+             *  2) Link A<->B, B<->C, C<->D, D<->E as Edges
+             *
+             *  case 2 - oneway reverse:
+             *  1) Add vertex A B C D E
+             *  2) Link B->A,C->B,D->C,E->D as Edges. result: A<-B<-C<-D<-E
+             *
+             *  case 3 - oneway normal:
+             *  1) Add vertex A B C D E
+             *  2) Link A->B, B->C, C->D, D->E as Edges. result: A->B->C->D->E
+             *
+             *
+             */
+
+            String onewayVal = way.get("oneway");   /*   get (oneway=?) tag for this way.   */
+            String junctionVal = way.get("junction");   /*   get (junction=?) tag for this way.   */
+
+            from = nodes.get(0);                   /*   1st node A  */
+            graph.addVertex(from);                 /*   add vertex A */
+
+            for (int i = 1; i < nodesCount; i++) { /*   loop from B until E */
+
+                to = nodes.get(i);                   /*   2nd node B   */
+
+                if (to != null && !to.isDeleted()) {
+                    graph.addVertex(to);               /*   add vertex B */
+
+
+                    //this is where we link the vertices
+                    // if (!routingProfile.isOnewayUsed()) {
+                    //     //"Ignore oneways" is selected
+                    //     addEdgeBidirectional(way, from, to);
+
+                    // } else if (onewayVal == null && "roundabout".equals(junctionVal)) {
+                    //     //Case (roundabout): oneway=implicit yes
+                    //     addEdgeNormalOneway(way, from, to);
+
+                    // } else if (onewayVal == null || Arrays.asList("false", "no", "0").contains(onewayVal)) {
+                    //     //Case (bi-way): oneway=false OR oneway=unset OR oneway=0 OR oneway=no
+                    //     addEdgeBidirectional(way, from, to);
+
+                    // } else if ("-1".equals(onewayVal)) {
+                    //     //Case (oneway reverse): oneway=-1
+                    //     addEdgeReverseOneway(way, from, to);
+
+                    // } else if (Arrays.asList("1", "yes", "true").contains(onewayVal)) {
+                    //     //Case (oneway normal): oneway=yes OR 1 OR true
+                    //     addEdgeNormalOneway(way, from, to);
+
+                    // }
+
+                    from = to;                         /*   we did A<->B, next loop we will do B<->C, so from=B,to=C for next loop. */
+                }
+
+            } // end of looping thru nodes
+        } // end of looping thru ways
+
+        Logging.trace("End Create Graph");
+        Logging.trace("Vertex: {0}", graph.vertexSet().size());
+        Logging.trace("Edges: {0}", graph.edgeSet().size());
+    }
+
+    public List<OsmEdge> applyAlgorithm(List<Node> nodes) {
+        List<OsmEdge> path = new ArrayList<>();
+        Graph<Node, OsmEdge> g;
+        double totalWeight = 0;
+        final Layer editLayer = MainApplication.getLayerManager().getEditLayer();
+        // final RoutingLayer layer =
+        // MainApplication.getLayerManager().getLayersOfType(RoutingLayer.class)
+        // .stream().filter(rLayer -> rLayer.getDataLayer() ==
+        // editLayer).findFirst().orElse(null);
+        // if (layer == null) {
+        // return Collections.emptyList();
+        // }
+        //RoutingModel routingModel = layer.getRoutingModel();
+
+        if (graph == null )
+            this.createGraph();
+        Logging.trace("apply algorithm between nodes ");
+
+        for (Node node : nodes) {
+            Logging.trace(Long.toString(node.getId()));
+        }
+        Logging.trace("-----------------------------------");
+
+        // Assign the graph to g
+        g = graph;
+
+        Logging.trace("Using Dijkstra algorithm");
+        DijkstraShortestPath<Node, OsmEdge> routingk = null;
+
+        
+
+        for (int index = 1; index < nodes.size(); ++index) {
+            routingk = new DijkstraShortestPath<>(g, nodes.get(index - 1), nodes.get(index));
+            if (routingk.getPathEdgeList() == null) {
+                Logging.trace("no path found!");
                 break;
             }
-            if (!checkedWays.contains(way)) {
-                checkedWays.add(way);
-            }
-
+            path.addAll(routingk.getPathEdgeList());
+            totalWeight += routingk.getPathLength();
         }
+        
 
-        if (foundWay == null) {
+        Logging.trace("shortest path found: {0}\nweight: {1}", path, totalWeight);
+        return path;
+    }
 
-            for (Way way : ways) {
-                List<Node> nodes = way.getNodes();
+    private Way checkNodeInWays(Node startNode, Node endNode, List<Way> ways) {
+        // Initialize distances map and priority queue
+        Map<Node, Double> distances = new HashMap<>();
+        PriorityQueue<Node> queue = new PriorityQueue<>(Comparator.comparingDouble(distances::get));
+        Map<Node, Node> previousNodes = new HashMap<>();
 
-                for (Node nodd : nodes) {
-                    List<Way> parentWays = nodd.getParentWays();
+        // Initialize distances to infinity and add start node to queue
+        for (Way way : ways) {
+            for (Node node : way.getNodes()) {
+                distances.put(node, Double.MAX_VALUE);
+                previousNodes.put(node, null);
+            }
+        }
+        distances.put(startNode, 0.0);
+        queue.add(startNode);
 
-                    parentWays.removeIf(parentWay -> checkedWays.contains(parentWay));
-
-  
-                    if (parentWays.size() > 0) {
-                        foundWay = checkNodeInWays(node, parentWays, level, waysCollected, checkedWays);
-                        if (foundWay != null) {
-                            waysCollected.add(foundWay);
-                            break;
-                        }
+        // Dijkstra's algorithm
+        while (!queue.isEmpty()) {
+            Node current = queue.poll();
+            if (current.equals(endNode)) {
+                // Reconstruct and return the shortest path
+                return reconstructPath(previousNodes, endNode);
+            }
+            for (Way way : current.getParentWays()) {
+                for (Node neighbor : way.getNodes()) {
+                    double distance = distances.get(current) + calculateDistance(current, neighbor);
+                    if (distance < distances.get(neighbor)) {
+                        distances.put(neighbor, distance);
+                        previousNodes.put(neighbor, current);
+                        queue.add(neighbor);
                     }
-
                 }
             }
-
-            level++;
         }
-
-        return foundWay;
-
+        // No path found
+        return null;
     }
+
+    private Way reconstructPath(Map<Node, Node> previousNodes, Node endNode) {
+        Way path = new Way();
+        Node current = endNode;
+        while (current != null) {
+            path.addNode(current);
+            current = previousNodes.get(current);
+        }
+        Collections.reverse(path.getNodes()); // Reverse the order to get the path from start to end
+        return path;
+    }
+
+    // private Way checkNodeInWays(Node node, List<Way> ways, int level, List<Way>
+    // waysCollected, List<Way> checkedWays) {
+    // if (level > 5) {
+    // return null;
+    // }
+
+    // Way foundWay = null;
+
+    // for (Way way : ways) {
+    // List<Node> nodes = way.getNodes();
+
+    // if (nodes.contains(node)) {
+    // foundWay = way;
+    // return foundWay;
+    // }
+
+    // // Add the current way to the checked ways list
+    // checkedWays.add(way);
+
+    // // dive deeper
+
+    // for (Node nodd : nodes) {
+    // List<Way> parentWays = nodd.getParentWays();
+
+    // // Remove checked ways from the parent ways list
+    // parentWays.removeAll(checkedWays);
+
+    // if (!parentWays.isEmpty()) {
+    // foundWay = checkNodeInWays(node, parentWays, level + 1, waysCollected,
+    // checkedWays);
+    // if (foundWay != null) {
+    // // Add the found way and the current way to the collected ways list
+    // if (!waysCollected.contains(foundWay)) {
+    // waysCollected.add(foundWay);
+    // }
+    // if (!waysCollected.contains(way)) {
+    // waysCollected.add(way);
+    // }
+
+    // return foundWay;
+    // }
+    // }
+    // }
+
+    // }
+
+    // // level++;
+
+    // return null;
+    // }
+
+    // my vers
+    // private Way checkNodeInWays(Node node, List<Way> ways, int level, List<Way>
+    // waysCollected, List<Way> checkedWays) {
+
+    // if (level > 5)
+    // return null;
+
+    // Way foundWay = null;
+
+    // for (Way way : ways) {
+    // List<Node> nodes = way.getNodes();
+
+    // if (nodes.contains(node)) {
+    // foundWay = way;
+    // return foundWay;
+    // // break;
+    // }
+    // if (!checkedWays.contains(way)) {
+    // checkedWays.add(way);
+    // }
+
+    // }
+
+    // for (Way way : ways) {
+
+    // List<Node> nodes = way.getNodes();
+
+    // for (Node nodd : nodes) {
+    // List<Way> parentWays = nodd.getParentWays();
+
+    // parentWays.removeIf(parentWay -> checkedWays.contains(parentWay));
+
+    // if (parentWays.size() > 0) {
+    // foundWay = checkNodeInWays(node, parentWays, level, waysCollected,
+    // checkedWays);
+    // if (foundWay != null) {
+    // if (!waysCollected.contains(foundWay)) {
+    // waysCollected.add(foundWay);
+    // }
+    // if (!waysCollected.contains(way)) {
+    // waysCollected.add(way);
+    // }
+
+    // return null;
+    // }
+    // }
+
+    // }
+    // }
+
+    // level++;
+
+    // return null;
+
+    // }
 
     private void performCut() {
         if (ctrl && pWays != null) {

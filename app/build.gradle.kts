@@ -23,6 +23,8 @@ dependencies {
     implementation("com.google.guava:guava:31.1-jre")
 
     implementation("org.locationtech.jts:jts-core:1.19.0")
+
+    implementation("org.jgrapht:jgrapht-jdk1.5:0.7.3")
 }
 
 // application {

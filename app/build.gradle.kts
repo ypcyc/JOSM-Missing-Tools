@@ -38,11 +38,11 @@ tasks.named<Test>("test") {
 josm {
   pluginName = "josm_plg"
    debugPort = 1729 // choose a random port for your project (to avoid clashes with other projects)
-  josmCompileVersion = "18969"
+  josmCompileVersion = "19017"
   manifest {
     description = "The description of my awesome plugin"
     mainClass = "org.openstreetmap.josm.plugins.myawesomeplugin.MyAwesomePlugin"
-    minJosmVersion = "18969"
+    minJosmVersion = "19017"
     // author = "John Doe"
     // canLoadAtRuntime = true
     // iconPath = "path/to/my/icon.svg"

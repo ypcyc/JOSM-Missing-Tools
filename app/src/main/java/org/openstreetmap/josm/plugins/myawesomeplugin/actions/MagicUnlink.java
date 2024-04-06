@@ -13,7 +13,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 
 import java.util.Set;
@@ -22,14 +21,12 @@ import java.util.stream.Collectors;
 import javax.swing.JOptionPane;
 
 import org.openstreetmap.josm.actions.JosmAction;
-import org.openstreetmap.josm.actions.UnGlueAction;
 import org.openstreetmap.josm.command.AddCommand;
 import org.openstreetmap.josm.command.ChangeNodesCommand;
 import org.openstreetmap.josm.command.Command;
 import org.openstreetmap.josm.command.SequenceCommand;
 import org.openstreetmap.josm.data.UndoRedoHandler;
 import org.openstreetmap.josm.data.coor.EastNorth;
-import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.osm.DataSet;
 import org.openstreetmap.josm.data.osm.DefaultNameFormatter;
 import org.openstreetmap.josm.data.osm.Node;
@@ -38,9 +35,7 @@ import org.openstreetmap.josm.data.osm.Relation;
 import org.openstreetmap.josm.data.osm.RelationMember;
 import org.openstreetmap.josm.data.osm.Way;
 import org.openstreetmap.josm.gui.Notification;
-import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.Geometry;
-import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
 
 public class MagicUnlink extends JosmAction {
@@ -54,7 +49,7 @@ public class MagicUnlink extends JosmAction {
      * Constructs a new {@code RunMagic}.
      */
     public MagicUnlink() {
-        super(tr("Magic Poligon Unlink"), "unglue", tr("Add missing nodes at intersections of selected ways."),
+        super(tr("Polygon Unlink"), "unglue", tr("Unlink polygon from ways"),
                 Shortcut.registerShortcut("tools:addintersect", tr("More tools: {0}", tr("Add nodes at intersections")),
                         KeyEvent.VK_M, Shortcut.SHIFT),
                 true);
@@ -83,59 +78,48 @@ public class MagicUnlink extends JosmAction {
             List<Node> selectedWayNodes = selectedWay.getNodes();
             List<Node> processedNodes = new ArrayList<>();
             List<Node> allNewNodes = new ArrayList<>();
-            // boolean found = false;
 
-            for (Node selectedWayNode : selectedWayNodes) {
-
-                // if (selectedWayNode.getId() == 1263693859) {
-                // Logging.info("Node found");
-                // }
+            selectedWayNodes.forEach(selectedWayNode -> {
 
                 // Check if node was already processed
                 if (!processedNodes.contains(selectedWayNode)) {
 
-                    List<Way> parentWays = selectedWayNode.getParentWays();
+                    List<Way> commonWays = selectedWayNode.getParentWays();
 
-                    if (parentWays.size() > 1) {
+                    if (commonWays.size() > 1) {
 
                         List<Node> commonNodes = new ArrayList<>();
 
-                        for (Way parentWay : parentWays) {
-                            //
-                            if (parentWay.getUniqueId() != selectedWay.getUniqueId() && !parentWay.isClosed()) {
+                        for (Way commonWayToUnglueFrom : commonWays) {
+                            // Process glued ways that are unclosed Ways
+                            if (commonWayToUnglueFrom.getUniqueId() != selectedWay.getUniqueId()
+                                    && !commonWayToUnglueFrom.isClosed()) {
 
-                                // if (way.getId() == 110735623) {
-                                // Logging.info("Way found"); // 963988860
-                                // found = true;
+                                List<Node> nodesToUnglueFrom = commonWayToUnglueFrom.getNodes();
 
-                                List<Node> parentWayNodes = parentWay.getNodes();
+                                for (Node nodeToUnglue : selectedWayNodes) {
 
-                                for (Node selectedWayNode1 : selectedWayNodes) {
-                                    //
-                                    if (parentWayNodes.contains(selectedWayNode1)
-                                            && !processedNodes.contains(selectedWayNode1)) {
-                                        commonNodes.add(selectedWayNode1);
+                                    if (nodesToUnglueFrom.contains(nodeToUnglue)
+                                            && !processedNodes.contains(nodeToUnglue)) {
+                                        if (!commonNodes.contains(nodeToUnglue)) {
+                                            commonNodes.add(nodeToUnglue);
+                                        }
                                     }
                                 }
 
                                 break;
-
-                                // }
-
                             }
-
                         }
 
                         if (commonNodes.size() > 0) {
 
                             processedNodes.addAll(commonNodes);
 
-                            // found = false;
-
                             List<Command> cmds = new ArrayList<>();
 
                             Map<Node, Node> replaced = new HashMap<>();
                             commonNodes.forEach(n -> replaced.put(n, cloneNode(n, cmds)));
+
                             List<Node> modNodes = new ArrayList<>(selectedWay.getNodes());
                             modNodes.replaceAll(n -> replaced.getOrDefault(n, n));
 
@@ -148,29 +132,21 @@ public class MagicUnlink extends JosmAction {
                                             commonNodes.size(), commonNodes.size(), 2 * commonNodes.size()),
                                     cmds));
 
-                            Collection<Node> newNodes = replaced.values();
+                            Collection<Node> newUngluedNodes = replaced.values();
 
                             EastNorth centerCoordinates = Geometry.getCentroid(selectedWayNodes);
 
-                            for (Node newNode : newNodes) {
+                            for (Node newNode : newUngluedNodes) {
                                 moveNodeInDirection(newNode, centerCoordinates, 0.01);
                                 allNewNodes.add(newNode);
                             }
-
-                            // Set<Node> Nodes = Geometry.addIntersections(ways, false, cmds);
-                            // getLayerManager().getEditDataSet().setSelected(replaced.values());
-
                         }
-
                     }
-
                 }
-            }
+            });
 
-            //
             if (allNewNodes.size() > 0) {
                 getLayerManager().getEditDataSet().setSelected(allNewNodes);
-
             }
 
         }

@@ -49,6 +49,10 @@ public class OsmEdge extends DefaultWeightedEdge {
         return this.way;
     }
 
+    public Node getTo(){
+        return this.to;
+    }
+
     public EastNorth fromEastNorth() {
         return this.from.getEastNorth();
     }

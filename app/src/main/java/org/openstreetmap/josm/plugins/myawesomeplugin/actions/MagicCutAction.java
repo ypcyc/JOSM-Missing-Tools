@@ -184,7 +184,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
     // Custom
     private DataSet ds;
-    //private List<Way> ringOneCrossingWays;
+    // private List<Way> ringOneCrossingWays;
     private List<Way> ringTwoCrossingWays;
     private List<Node> intersectionNodes;
     private List<Way> createdWays;
@@ -430,82 +430,91 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
                 Way refWay = referenceSegment.getWay();
 
-                //offsetWays.add(refWay);
+                offsetWays.add(refWay);
 
-                Command cmd = DeleteCommand.delete(offsetWays, false, false);
+                Command cmd = DeleteCommand.delete(offsetWays, true, false);
                 UndoRedoHandler.getInstance().add(cmd);
 
+                mv.removeTemporaryLayer(temporaryLayer);
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                        "No crossing polygon found. Check if related relations memembers are downloaded");
-                return;
-            }
-
-            Logging.info("Relation found: " + relation.getUniqueId());
-
-            // 2. get nodes inside
-            // checkNodeOutsideMultipolygon
-            // getClosestNodesOutsideMultipolygon(relation);
-
-            // simple no inner, end nodes outside
-            // complicated with inner, only one outside
-
-            //ringOneCrossingWays = new ArrayList<>();
-            ringTwoCrossingWays = new ArrayList<>();
-            intersectionNodes = new ArrayList<>();
-            createdWays = new ArrayList<>();
-
-            tryToCutRelationWithWayV2(relation, offsetWays.get(0));
-
-            if (ringTwoCrossingWays.size() == 0) {
-                List<Way> tmpOffsetWays = new ArrayList<>();
-                tmpOffsetWays.add(offsetWays.get(1));
-                relation = getCrossingRelation(tmpOffsetWays);
-                Logging.info("Processing new relation: " + relation.getUniqueId());
-                tryToCutRelationWithWayV2(relation, offsetWays.get(1));
+                        "You are probably trying to cut incomplete polygon. Please check if all related relation memembers are downloaded");
+                // return;
             } else {
-                Logging.info("Continue processing relation: " + relation.getUniqueId());
-                tryToCutRelationWithWayV2(relation, offsetWays.get(1));
-            }
 
-            if (ringTwoCrossingWays.size() > 0) {
-                // Rebuild Relation
-                List<Way> waysForDeletion = splitRingsAndGetWaysForDeletionV2(relation);
-                reconstructRelation(relation, waysForDeletion);
+                Logging.info("Relation found: " + relation.getUniqueId());
 
-                // Delete initial route path
-                // referenceSegment
-                Command cmd = DeleteCommand.delete(Collections.singletonList(referenceSegment.getWay()), true, false);
-                UndoRedoHandler.getInstance().add(cmd);
+                // 2. get nodes inside
 
-            } else {
-                // sourceWays
-                // delete reletation
+                // getClosestNodesOutsideMultipolygon(relation);
 
-                if (sourceWays == null) {
-                    Logging.info("Error: No source ways found");
-                    return;
+                // simple no inner, end nodes outside
+                // complicated with inner, only one outside
+
+                // ringOneCrossingWays = new ArrayList<>();
+                ringTwoCrossingWays = new ArrayList<>();
+                intersectionNodes = new ArrayList<>();
+                createdWays = new ArrayList<>();
+
+                Logging.info("Cut with first Offset line");
+                tryToCutRelationWithWayV2(relation, offsetWays.get(0));
+
+                if (ringTwoCrossingWays.size() == 0) {
+                    List<Way> tmpOffsetWays = new ArrayList<>();
+                    tmpOffsetWays.add(offsetWays.get(1));
+                    relation = getCrossingRelation(tmpOffsetWays);
+                    Logging.info("Processing new relation: " + relation.getUniqueId());
+                    tryToCutRelationWithWayV2(relation, offsetWays.get(1));
+                } else {
+                    Logging.info("Continue processing relation: " + relation.getUniqueId());
+                    tryToCutRelationWithWayV2(relation, offsetWays.get(1));
                 }
 
-                relation = getCrossingRelation(new ArrayList<>(sourceWays));
-                if (relation == null) {
-                    Logging.info("Error: No relation found");
-                    return;
-                }
-                Logging.info("Delete unneeded relation: " + relation.getUniqueId());
+                if (ringTwoCrossingWays.size() > 0) {
+                    Logging.info("Rebuilding Relation, getting Ring ways (holes) for deletion");
 
-                Collection<OsmPrimitive> relationWithMembersToDelete = new ArrayList<>();
-                relationWithMembersToDelete.add(relation);
+                    // Rebuild Relation
+                    List<Way> waysForDeletion = splitRingsAndGetWaysForDeletionV2(relation);
+                    reconstructRelation(relation, waysForDeletion);
 
-                for (Way way : relation.getMemberPrimitives(Way.class)) {
-                    Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
-                    if (parentRelations.size() == 1) {
-                        relationWithMembersToDelete.add(way);
+                    // Delete initial route path
+                    // referenceSegment
+                    Command cmd = DeleteCommand.delete(Collections.singletonList(referenceSegment.getWay()), true,
+                            false);
+                    UndoRedoHandler.getInstance().add(cmd);
+
+                } else {
+                    // sourceWays
+                    // delete reletation (after Simple cut)
+
+                    if (sourceWays == null) {
+                        Logging.info("Error: No source ways found");
+                        return;
                     }
+
+                    relation = getCrossingRelation(new ArrayList<>(sourceWays));
+                    if (relation == null) {
+                        Logging.info("Error: No relation found");
+                        return;
+                    }
+                    Logging.info("Delete unneeded relation: " + relation.getUniqueId());
+
+                    Collection<OsmPrimitive> relationWithMembersToDelete = new ArrayList<>();
+                    relationWithMembersToDelete.add(relation);
+
+                    for (Way way : relation.getMemberPrimitives(Way.class)) {
+                        Set<Relation> parentRelations = OsmPrimitive.getParentRelations(Collections.singleton(way));
+                        if (parentRelations.size() == 1) {
+                            relationWithMembersToDelete.add(way);
+                        }
+                    }
+
+                    //Add Source way
+                    relationWithMembersToDelete.addAll(sourceWays);
+
+                    Command cmd = DeleteCommand.delete(relationWithMembersToDelete, true, false);
+                    UndoRedoHandler.getInstance().add(cmd);
+
                 }
-
-                Command cmd = DeleteCommand.delete(relationWithMembersToDelete, true, false);
-                UndoRedoHandler.getInstance().add(cmd);
-
             }
 
             // switch mode
@@ -688,8 +697,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
     }
 
     void performSimpleCut(Relation relation, Way offsetWay) {
-        //
-        // simple split
+
         Set<Way> newIntersectedWays2 = new HashSet<>();
 
         // Find ways of relation intersecting with new Offset way
@@ -776,6 +784,8 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
     void tryToCutRelationWithWayV2(Relation relation, Way offsetWay) {
 
+        Logging.info("Cutting relation: " + relation.getUniqueId() + " with offsetWay: " + offsetWay.getUniqueId());
+
         // TODO offset way may cross different ways
 
         // 1 check if selected way crosses inner polygon
@@ -808,15 +818,18 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
         if (outerRings.size() == 1 && innerRings.size() == 0) {
             // Simple Split
+            Logging.info("Performing simple cut");
             performSimpleCut(relation, offsetWay);
 
         } else if (outerRings.size() == 1 && innerRings.size() == 1) {
             // Join Outer with Inner
+            Logging.info("Join Outer Ring with Inner Ring");
             ringOneCrossingWay = getMemberOfRing(outerRings.get(0), outerCrossingWays.get(0));
             ringTwoCrossingWay = getMemberOfRing(innerRings.get(0), innerCrossingWays.get(0));
 
         } else if (outerRings.size() == 0 && innerRings.size() == 2) {
             // Join 2 Inner
+            Logging.info("Join 2 Inner Rings");
             ringOneCrossingWay = getMemberOfRing(innerRings.get(0), innerCrossingWays.get(0));
             ringTwoCrossingWay = getMemberOfRing(innerRings.get(1), innerCrossingWays.get(1));
         } else {
@@ -855,11 +868,12 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
             waysForIntersections.add(ringOneCrossingWay);
             waysForIntersections.add(ringTwoCrossingWay);
             waysForIntersections.add(offsetWay);
-            Set<Node> intersectionNodesSet = createIntersection(waysForIntersections);
 
+            Set<Node> intersectionNodesSet = createIntersection(waysForIntersections);
             intersectionNodes.addAll(intersectionNodesSet);
 
-            // Split way
+            // Split way using Intersection nodes
+            Logging.info("Split way using Intersection nodes");
 
             List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(offsetWay,
                     intersectionNodes);
@@ -880,33 +894,25 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
             // delete unneeded ways
             Collection<OsmPrimitive> results = getLayerManager().getEditDataSet().getSelected();
-
             Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
-            // waysToDelete.add(offsetWay);
 
             for (OsmPrimitive element : results) {
                 if (element instanceof Way) {
-
                     Way wayElement = (Way) element;
-
                     if (intersectionNodes.contains(wayElement.firstNode())
                             && intersectionNodes.contains(wayElement.lastNode())) {
                         createdWays.add(wayElement);
                     } else {
                         waysToDelete.add(wayElement);
                     }
-
                 }
-
             }
 
-            // delete unused ways
             if (!waysToDelete.isEmpty()) {
-
                 Command cmd = DeleteCommand.delete(waysToDelete, true, false);
                 UndoRedoHandler.getInstance().add(cmd);
-
             }
+            Logging.info("Deleted unused Waychunks after split");
 
         }
 
@@ -949,6 +955,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
         List<Node> ringIntersectionNodes2 = null;
 
         // Find Rings containing intersection Nodes and split them
+        Logging.info("Find Rings containing intersection Nodes and split them");
         for (JoinedPolygon ring : checkRings) {
 
             List<Node> ringIntersectionNodes = new ArrayList<>();
@@ -966,6 +973,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
             }
 
             // split
+            Logging.info("Split Ring to get 'hole'");
             if (ringIntersectionNodes.size() == 2 && splitWays.size() == 1) {
 
                 // simple split
@@ -978,7 +986,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
                 cmds.add(result);
 
                 if (!cmds.isEmpty()) {
-                    UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split way"),
+                    UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Split Ring way"),
                             cmds));
                     getLayerManager().getEditDataSet().setSelected(result.getNewSelection());
                 }
@@ -993,11 +1001,14 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
         }
 
+        Logging.info("Rebuild Polygon to fetch actual Ways after splitting");
         // reconstruct multipolygon to find Ways for deletion after Split
         checkRings = buildMultipolygonAndGetRings(relation);
 
+        Logging.info("Getting hole for Ring 1");
         ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ringIntersectionNodes1));
         // TODO FIX ringIntersectionNodes2 null
+        Logging.info("Getting hole for Ring 2");
         ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ringIntersectionNodes2));
 
         return ringDeletionWays;
@@ -1018,6 +1029,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
         if (foundRing == null)
             return null;
 
+        // TODO need to debug
         Pair<double[], Way[][]> checkedDistances = calculateDistancesBetweenWaysInClosedWay(foundRing.ways,
                 ringIntersectionNodes.get(0), ringIntersectionNodes.get(1));
 
@@ -1062,7 +1074,13 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
                 Way currentWay = ways.get(currentIndex);
                 waysTraversed.add(currentWay); // Collect the current way
 
-                currentIndex = (currentIndex + 1) % ways.size();
+                // Fix???
+                if (currentWay.lastNode() == node1 || currentWay.lastNode() == node2) {
+                    currentIndex = targetIndex;
+                } else {
+                    currentIndex = (currentIndex + 1) % ways.size();
+                }
+
             }
 
             // Add the last way visited to waysTraversed
@@ -1086,6 +1104,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
         LinkedList<Command> cmds = new LinkedList<>();
         Set<Node> Nodes = Geometry.addIntersections(ways, false, cmds);
         Logging.info("Created nodes count " + Nodes.size());
+
         if (!cmds.isEmpty()) {
             UndoRedoHandler.getInstance().add(new SequenceCommand(tr("Add nodes at intersections"), cmds));
             Set<Node> nodes = new HashSet<>(10);
@@ -1106,56 +1125,20 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
         return Nodes;
     }
 
-    private Command createAddWayCommand(Way newWay) {
+    // private Command createAddWayCommand(Way newWay) {
 
-        List<Command> commands = new LinkedList<>();
-        List<Node> sourceNodes = newWay.getNodes();
+    // List<Command> commands = new LinkedList<>();
+    // List<Node> sourceNodes = newWay.getNodes();
 
-        for (Node originalNode : sourceNodes) {
-            commands.add(new AddCommand(this.ds, originalNode));
-        }
+    // for (Node originalNode : sourceNodes) {
+    // commands.add(new AddCommand(this.ds, originalNode));
+    // }
 
-        commands.add(new AddCommand(ds, newWay));
+    // commands.add(new AddCommand(ds, newWay));
 
-        return new SequenceCommand(tr("Add way"), commands);
+    // return new SequenceCommand(tr("Add way"), commands);
 
-    }
-
-    private Way checkWayAndTryToMinimize(Way initialWay, Node startingNode, Area innerArea) {
-
-        Way partWay = new Way();
-
-        // Last (with arrow end)?
-
-        List<Node> initialWayNodes = initialWay.getNodes();
-        if (startingNode.getUniqueId() == initialWay.firstNode().getUniqueId()) {
-            // Forward loop
-            for (int i = 0; i < initialWayNodes.size(); i++) {
-                Node node = initialWayNodes.get(i);
-                Logging.info("Forward, Node for short way: " + i + "  " + node.getUniqueId());
-                partWay.addNode(new Node(node, true));
-                EastNorth en = node.getEastNorth();
-                if (innerArea.contains(en.east(), en.north())) {
-                    break;
-                }
-            }
-
-        } else if (startingNode.getUniqueId() == initialWay.lastNode().getUniqueId()) {
-            // Reverse loop
-            for (int i = initialWayNodes.size() - 1; i >= 0; i--) {
-                Node node = initialWayNodes.get(i);
-                Logging.info("Reverse, Node for short way: " + i + "  " + node.getUniqueId());
-                partWay.addNode(new Node(node, true));
-                EastNorth en = node.getEastNorth();
-                if (innerArea.contains(en.east(), en.north())) {
-                    break;
-                }
-            }
-
-        }
-
-        return partWay;
-    }
+    // }
 
     private List<Way> getRelationIntersectedMemberWayWithRole(Relation relation, Set<Way> intersectedWays,
             String role) {
@@ -1177,32 +1160,6 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
         return foundMembers;
 
-    }
-
-    private boolean checkNodeOutsideArea(Node node, Area area) {
-        EastNorth en = node.getEastNorth();
-        return area.contains(en.east(), en.north());
-    }
-
-    private boolean checkNodeOutsideMultipolygon(Relation relation, Node endNode) {
-        // Check if created ways start and end points a within relation multipolygon
-
-        System.out.println("Checking if Node is outside polygon: " + endNode.getUniqueId());
-        Collection<OsmPrimitive> primitivesInsideMultipolygon = NodeWayUtils
-                .selectAllInside(Collections.singletonList(relation), this.ds, false);
-
-        for (OsmPrimitive osmPrimitiveInside : primitivesInsideMultipolygon) {
-            if (osmPrimitiveInside instanceof Node) {
-
-                Node nodeInside = (Node) osmPrimitiveInside;
-                if (nodeInside.getUniqueId() == endNode.getUniqueId()) {
-                    System.out.println("Node is inside polygon: " + endNode.getUniqueId());
-                    return false;
-                }
-
-            }
-        }
-        return true;
     }
 
     public Relation getCrossingRelation(List<Way> offsetWays) {

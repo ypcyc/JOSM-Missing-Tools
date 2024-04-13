@@ -1,4 +1,4 @@
-package org.openstreetmap.josm.plugins.myawesomeplugin.actions;
+package org.openstreetmap.josm.plugins.missingtools.actions;
 
 import static org.openstreetmap.josm.gui.help.HelpUtil.ht;
 import static org.openstreetmap.josm.tools.I18n.tr;
@@ -38,7 +38,7 @@ import org.openstreetmap.josm.gui.Notification;
 import org.openstreetmap.josm.tools.Geometry;
 import org.openstreetmap.josm.tools.Shortcut;
 
-public class MagicUnlink extends JosmAction {
+public class PolygonUnlink extends JosmAction {
 
     private DataSet ds;
 
@@ -48,7 +48,7 @@ public class MagicUnlink extends JosmAction {
     /**
      * Constructs a new {@code RunMagic}.
      */
-    public MagicUnlink() {
+    public PolygonUnlink() {
         super(tr("Polygon Unlink"), "unglue", tr("Unlink polygon from ways"),
                 Shortcut.registerShortcut("tools:addintersect", tr("More tools: {0}", tr("Add nodes at intersections")),
                         KeyEvent.VK_M, Shortcut.SHIFT),

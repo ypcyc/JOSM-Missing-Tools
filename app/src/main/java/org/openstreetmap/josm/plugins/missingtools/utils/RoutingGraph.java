@@ -1,4 +1,4 @@
-package org.openstreetmap.josm.plugins.myawesomeplugin.utils;
+package org.openstreetmap.josm.plugins.missingtools.utils;
 
 import org.openstreetmap.josm.data.osm.DataSet;
 import org.openstreetmap.josm.data.osm.Node;
@@ -106,11 +106,11 @@ public class RoutingGraph {
      * Apply selected routing algorithm to the graph.
      *
      * @param nodes
-     *            Nodes used to calculate path.
+     *                  Nodes used to calculate path.
      * @param algorithm
-     *            Algorithm used to compute the path,
-     *            RoutingGraph.Algorithm.ROUTING_ALG_DIJKSTRA or
-     *            RoutingGraph.Algorithm.ROUTING_ALG_BELLMANFORD
+     *                  Algorithm used to compute the path,
+     *                  RoutingGraph.Algorithm.ROUTING_ALG_DIJKSTRA or
+     *                  RoutingGraph.Algorithm.ROUTING_ALG_BELLMANFORD
      * @return new path.
      */
     public List<OsmEdge> applyAlgorithm(DataSet ds, List<Node> nodes) {

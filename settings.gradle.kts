@@ -7,7 +7,7 @@
  * in the user manual at https://docs.gradle.org/8.0.2/userguide/multi_project_builds.html
  */
 
-rootProject.name = "josm_plg"
+rootProject.name = "josm_missingtools"
 include("app")
 
 

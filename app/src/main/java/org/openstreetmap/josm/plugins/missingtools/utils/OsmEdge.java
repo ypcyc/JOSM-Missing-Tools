@@ -1,4 +1,4 @@
-package org.openstreetmap.josm.plugins.myawesomeplugin.utils;
+package org.openstreetmap.josm.plugins.missingtools.utils;
 
 import org.jgrapht.graph.DefaultWeightedEdge;
 import org.openstreetmap.josm.data.coor.EastNorth;
@@ -7,6 +7,7 @@ import org.openstreetmap.josm.data.osm.Way;
 
 /**
  * Class that represents an edge of the graph.
+ * 
  * @author jose
  */
 public class OsmEdge extends DefaultWeightedEdge {
@@ -49,7 +50,7 @@ public class OsmEdge extends DefaultWeightedEdge {
         return this.way;
     }
 
-    public Node getTo(){
+    public Node getTo() {
         return this.to;
     }
 
@@ -63,6 +64,7 @@ public class OsmEdge extends DefaultWeightedEdge {
 
     /**
      * Returns length of segment in meters
+     * 
      * @return length of segment in meters.
      */
     public double getLength() {

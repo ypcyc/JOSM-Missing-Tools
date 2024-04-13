@@ -22,14 +22,14 @@ dependencies {
     // This dependency is used by the application.
     implementation("com.google.guava:guava:31.1-jre")
 
-    implementation("org.locationtech.jts:jts-core:1.19.0")
+    //implementation("org.locationtech.jts:jts-core:1.19.0")
 
     implementation("org.jgrapht:jgrapht-jdk1.5:0.7.3")
 }
 
 // application {
 //     // Define the main class for the application.
-//     mainClass.set("josm_plg.App")
+//     mainClass.set("josm_missingtools.App")
 // }
 
 tasks.named<Test>("test") {
@@ -38,22 +38,22 @@ tasks.named<Test>("test") {
 }
 
 josm {
-  pluginName = "josm_plg"
-   debugPort = 1729 // choose a random port for your project (to avoid clashes with other projects)
-  josmCompileVersion = "19017"
+  pluginName = "josm_missingtools"
+   debugPort = 3626 // choose a random port for your project (to avoid clashes with other projects)
+  josmCompileVersion = "19039"
   manifest {
     description = "The description of my awesome plugin"
-    mainClass = "org.openstreetmap.josm.plugins.myawesomeplugin.MyAwesomePlugin"
+    mainClass = "org.openstreetmap.josm.plugins.missingtools.MissingTools"
     minJosmVersion = "19017"
-    // author = "John Doe"
+    author = "Maratkuls Kosojevs"
     // canLoadAtRuntime = true
     // iconPath = "path/to/my/icon.svg"
     // loadEarly = false
     // loadPriority = 50
     // pluginDependencies += setOf("apache-commons", "apache-http")
     // website = java.net.URL("https://example.org")
-    // oldVersionDownloadLink(123, "v1.2.0", java.net.URL("https://example.org/download/v1.2.0/MyAwesomePlugin.jar"))
-    // oldVersionDownloadLink( 42, "v1.0.0", java.net.URL("https://example.org/download/v1.0.0/MyAwesomePlugin.jar"))
+    // oldVersionDownloadLink(123, "v1.2.0", java.net.URL("https://example.org/download/v1.2.0/MissingTools.jar"))
+    // oldVersionDownloadLink( 42, "v1.0.0", java.net.URL("https://example.org/download/v1.0.0/MissingTools.jar"))
 
     // to populate the 'Class-Path' attribute in the JOSM plugin manifest invoke
     // the function 'classpath', i.e.

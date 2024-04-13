@@ -1,4 +1,4 @@
-package org.openstreetmap.josm.plugins.myawesomeplugin.actions;
+package org.openstreetmap.josm.plugins.missingtools.actions;
 
 import static org.openstreetmap.josm.tools.I18n.marktr;
 import static org.openstreetmap.josm.tools.I18n.tr;
@@ -67,9 +67,9 @@ import org.openstreetmap.josm.gui.draw.MapViewPath;
 import org.openstreetmap.josm.gui.layer.AbstractMapViewPaintable;
 import org.openstreetmap.josm.gui.layer.Layer;
 import org.openstreetmap.josm.gui.util.ModifierExListener;
-import org.openstreetmap.josm.plugins.myawesomeplugin.utils.NodeWayUtils;
-import org.openstreetmap.josm.plugins.myawesomeplugin.utils.OsmEdge;
-import org.openstreetmap.josm.plugins.myawesomeplugin.utils.RoutingGraph;
+import org.openstreetmap.josm.plugins.missingtools.utils.NodeWayUtils;
+import org.openstreetmap.josm.plugins.missingtools.utils.OsmEdge;
+import org.openstreetmap.josm.plugins.missingtools.utils.RoutingGraph;
 
 import org.openstreetmap.josm.plugins.utilsplugin2.actions.SplitObjectAction;
 import org.openstreetmap.josm.tools.CheckParameterUtil;
@@ -111,7 +111,7 @@ import org.openstreetmap.josm.tools.Shortcut;
  *
  * @author Ole Jørgen Brønner (olejorgenb)
  */
-public class MagicCutAction extends MapMode implements ModifierExListener {
+public class PolygonCutAction extends MapMode implements ModifierExListener {
 
     private static final CachingProperty<BasicStroke> HELPER_LINE_STROKE = new StrokeProperty(
             prefKey("stroke.hepler-line"), "1").cached();
@@ -183,11 +183,11 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
     private static final List<String> IRRELEVANT_KEYS = Arrays.asList("source", "created_by", "note");
 
     /**
-     * Constructs a new {@code MagicCutAction}.
+     * Constructs a new {@code PolygonCutAction}.
      * 
      * @param mapFrame Map frame
      */
-    public MagicCutAction(MapFrame mapFrame) {
+    public PolygonCutAction(MapFrame mapFrame) {
         super(tr("Polygon Cut"),
                 "polycut",
                 tr("Cut Polygon by parallel copies of ways"),
@@ -425,7 +425,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
 
                 mv.removeTemporaryLayer(temporaryLayer);
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                        "You are probably trying to cut incomplete polygon. Please check if all related relation memembers are downloaded");
+                        "You are probably trying to cut incomplete polygon. Please check if all related relation members are downloaded");
 
             } else {
 
@@ -963,6 +963,15 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
                     ring2IntersectionNodes = ringIntersectionNodes;
                 }
 
+            } else if (ringIntersectionNodes.size() > 2) {
+                Logging.info("Error: One of the Offset Lines intersects Ring in multiple points");
+
+                if (!ringIntersectionNodes.isEmpty()) {
+                    getLayerManager().getEditDataSet().setSelected(ringIntersectionNodes);
+                }
+
+                JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
+                        "One of the Offset Lines intersects Ring in multiple points.");
             }
 
         }
@@ -972,10 +981,18 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
         checkRings = buildMultipolygonAndGetRings(relation);
 
         Logging.info("Getting hole for Ring 1");
-        ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ring1IntersectionNodes));
-        // TODO FIX ringIntersectionNodes2 null
+        if (ring1IntersectionNodes != null && ring1IntersectionNodes.size() == 2) {
+            ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ring1IntersectionNodes));
+        } else {
+            Logging.info("Error: Problems with Split Nodes for Ring 1");
+        }
+
         Logging.info("Getting hole for Ring 2");
-        ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ring2IntersectionNodes));
+        if (ring2IntersectionNodes != null && ring2IntersectionNodes.size() == 2) {
+            ringDeletionWays.addAll(getRingWaysForDeletion(checkRings, ring2IntersectionNodes));
+        } else {
+            Logging.info("Error: Problems with Split Nodes for Ring 2");
+        }
 
         return ringDeletionWays;
     }
@@ -1393,7 +1410,7 @@ public class MagicCutAction extends MapMode implements ModifierExListener {
             return true;
         } catch (IllegalArgumentException e) {
             Logging.debug(e);
-            new Notification(tr("MagicCutAction\n" +
+            new Notification(tr("PolygonCutAction\n" +
                     "The ways selected must form a simple branchless path"))
                     .setIcon(JOptionPane.INFORMATION_MESSAGE)
                     .show();

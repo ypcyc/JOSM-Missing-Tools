@@ -431,14 +431,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
                 Logging.info("Relation found: " + relation.getUniqueId());
 
-                // 2. get nodes inside
-
-                // getClosestNodesOutsideMultipolygon(relation);
-
-                // simple no inner, end nodes outside
-                // complicated with inner, only one outside
-
-                // ringOneCrossingWays = new ArrayList<>();
                 ringTwoCrossingWays = new ArrayList<>();
                 intersectionNodes = new ArrayList<>();
                 createdWays = new ArrayList<>();
@@ -707,7 +699,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
                 new ArrayList<>(intersectionNodes));
         Logging.info("Waychunks count: " + wayChunks.size());
 
-        // Collection<? extends OsmPrimitive> resultWays = Collections.emptyList();
         SplitWayCommand result = SplitWayCommand.splitWay(offsetWay,
                 wayChunks, Collections.emptyList());
 
@@ -811,7 +802,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             Logging.info("Error finding proper Rings");
         }
 
-        /// 2 check start/end point ouside outer polygon
+        /// 2 check start/end point outside outer polygon
         // NOTE Nodes in Inner rings also considered outside
         // boolean firstOutside = checkNodeOutsideArea(offsetWay.firstNode(),
         /// outerRings.get(0).area);
@@ -837,7 +828,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
                 return;
             }
 
-            // Create intersection Nodes for later split
+            // Create Intersection Nodes for later split
             List<Way> waysForIntersections = new ArrayList<>();
             waysForIntersections.add(ringOneCrossingWay);
             waysForIntersections.add(ringTwoCrossingWay);
@@ -1107,21 +1098,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         return Nodes;
     }
 
-    // private Command createAddWayCommand(Way newWay) {
-
-    // List<Command> commands = new LinkedList<>();
-    // List<Node> sourceNodes = newWay.getNodes();
-
-    // for (Node originalNode : sourceNodes) {
-    // commands.add(new AddCommand(this.ds, originalNode));
-    // }
-
-    // commands.add(new AddCommand(ds, newWay));
-
-    // return new SequenceCommand(tr("Add way"), commands);
-
-    // }
-
     private List<Way> getRelationIntersectedMemberWayWithRole(Relation relation, Set<Way> intersectedWays,
             String role) {
 
@@ -1135,13 +1111,11 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
                 if (intersectedWays.contains(wayElement)) {
                     foundMembers.add(wayElement);
-
                 }
             }
         }
 
         return foundMembers;
-
     }
 
     public Relation getCrossingRelation(List<Way> offsetWays) {
@@ -1300,7 +1274,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         if (toTheRight) {
             d = -d;
         }
-        // TODO draw second line
+
         pWays.changeOffset(d);
 
         pWaysMirrored.changeOffset(-d);

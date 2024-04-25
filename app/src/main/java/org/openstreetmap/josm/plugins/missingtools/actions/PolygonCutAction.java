@@ -408,6 +408,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             offsetWays.addAll(pWaysMirrored.getWays());
 
             // 1. find relation/polygon
+            // TODO check for correct relation
 
             Relation relation = getCrossingRelation(offsetWays);
             if (relation == null) {
@@ -436,18 +437,21 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
                 createdWays = new ArrayList<>();
 
                 Logging.info("Cut with first Offset line");
-                tryToCutRelationWithWayV2(relation, offsetWays.get(0));
+                boolean cutCompleted = tryToCutRelationWithWayV2(relation, offsetWays.get(0));
 
-                if (ringTwoCrossingWays.size() == 0) {
+                if (cutCompleted && ringTwoCrossingWays.size() == 0) {
                     List<Way> tmpOffsetWays = new ArrayList<>();
                     tmpOffsetWays.add(offsetWays.get(1));
                     relation = getCrossingRelation(tmpOffsetWays);
                     Logging.info("Processing new relation: " + relation.getUniqueId());
-                    tryToCutRelationWithWayV2(relation, offsetWays.get(1));
-                } else {
+                    cutCompleted = tryToCutRelationWithWayV2(relation, offsetWays.get(1));
+                } else if (cutCompleted) {
                     Logging.info("Continue processing relation: " + relation.getUniqueId());
-                    tryToCutRelationWithWayV2(relation, offsetWays.get(1));
+                    cutCompleted = tryToCutRelationWithWayV2(relation, offsetWays.get(1));
                 }
+
+                if (!cutCompleted)
+                    return;
 
                 if (ringTwoCrossingWays.size() > 0) {
                     Logging.info("Rebuilding Relation, getting Ring ways (holes) for deletion");
@@ -645,11 +649,9 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
     List<JoinedPolygon> getParentRingsForWays(Relation relation, List<Way> ways) {
 
         List<JoinedPolygon> intersectingRings = new ArrayList<>();
-
         List<JoinedPolygon> checkRings = buildMultipolygonAndGetRings(relation);
 
         for (JoinedPolygon checkRing : checkRings) {
-
             for (Way way : ways) {
                 if (checkRing.ways.contains(way)) {
                     if (!intersectingRings.contains(checkRing)) {
@@ -657,7 +659,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
                     }
                 }
             }
-
         }
 
         return intersectingRings;
@@ -671,10 +672,10 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         }
 
         return null;
-        // return ring.ways.get(0);
+
     }
 
-    void performSimpleCut(Relation relation, Way offsetWay) {
+    boolean performSimpleCut(Relation relation, Way offsetWay) {
 
         // Find Ways of Relation intersecting with Offset Line
         Set<Way> intersectedWaysWithOffsetLine = new HashSet<>();
@@ -698,6 +699,12 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(offsetWay,
                 new ArrayList<>(intersectionNodes));
         Logging.info("Waychunks count: " + wayChunks.size());
+
+        if (wayChunks.size() != 3) {
+            // Way crosses polygon at multiple points
+            JOptionPane.showMessageDialog(MainApplication.getMainFrame(), "Way crosses polygon at multiple points");
+            return false;
+        }
 
         SplitWayCommand result = SplitWayCommand.splitWay(offsetWay,
                 wayChunks, Collections.emptyList());
@@ -744,13 +751,13 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             Command cmd = DeleteCommand.delete(waysToDelete, true, false);
             UndoRedoHandler.getInstance().add(cmd);
         }
+
+        return true;
     }
 
-    void tryToCutRelationWithWayV2(Relation relation, Way offsetWay) {
+    boolean tryToCutRelationWithWayV2(Relation relation, Way offsetWay) {
 
         Logging.info("Cutting relation: " + relation.getUniqueId() + " with offsetWay: " + offsetWay.getUniqueId());
-
-        // TODO offset way may cross different ways
 
         // 1 check if selected way crosses inner polygon
         Set<Way> intersectedWaysWithOffsetLine = new HashSet<>();
@@ -761,17 +768,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
         NodeWayUtils.addWaysIntersectingWays(getLayerManager().getActiveDataSet().getWays(),
                 Collections.singletonList(offsetWay), intersectedWaysWithOffsetLine);
-
-        // Iterator<Way> iterator = intersectedWaysWithOffsetLine.iterator();
-        // Way firstWay = iterator.next();
-
-        // if (intersectedWaysWithOffsetLine.size() == 1 && !firstWay.isClosed()) {
-        // JOptionPane.showMessageDialog(MainApplication.getMainFrame(), "Offset Line
-        // does not cross Polygon");
-        // return;
-        // }
-
-        // TODO check if inner is closest to outer
 
         List<Way> outerCrossingWays = getRelationIntersectedMemberWayWithRole(relation, intersectedWaysWithOffsetLine,
                 "outer");
@@ -784,7 +780,9 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         if (outerRings.size() == 1 && innerRings.size() == 0) {
             // Simple Split
             Logging.info("Performing simple cut");
-            performSimpleCut(relation, offsetWay);
+            boolean cutCompleted = performSimpleCut(relation, offsetWay);
+            if (!cutCompleted)
+                return cutCompleted;
 
         } else if (outerRings.size() == 1 && innerRings.size() == 1) {
             // Join Outer with Inner
@@ -825,7 +823,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
             if (error != null) {
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(), error);
-                return;
+                return false;
             }
 
             // Create Intersection Nodes for later split
@@ -843,6 +841,12 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             List<List<Node>> wayChunks = SplitWayCommand.buildSplitChunks(offsetWay,
                     intersectionNodes);
             Logging.info("Waychunks count: " + wayChunks.size());
+
+            if (wayChunks.size() != 3) {
+                // Way crosses polygon at multiple points
+                JOptionPane.showMessageDialog(MainApplication.getMainFrame(), "Way crosses polygon at multiple points");
+                return false;
+            }
 
             SplitWayCommand splitWayCommand = SplitWayCommand.splitWay(offsetWay,
                     wayChunks, Collections.emptyList());
@@ -880,7 +884,32 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             Logging.info("Deleted unused Waychunks after split");
 
         }
+        return true;
+    }
 
+    private boolean checkIfNodesOutsideMultipolygon(Relation relation, List<Node> endNodes) {
+        // Check if created Offset ways start and end points a within relation
+        // multipolygon
+        boolean nodesOutside = true;
+        System.out.println("Checking if Nodes are outside polygon");
+        Collection<OsmPrimitive> primitivesInsideMultipolygon = NodeWayUtils
+                .selectAllInside(Collections.singletonList(relation), this.ds, false);
+        for (OsmPrimitive osmPrimitiveInside : primitivesInsideMultipolygon) {
+            if (osmPrimitiveInside instanceof Node && nodesOutside) {
+
+                Node nodeInside = (Node) osmPrimitiveInside;
+                for (Node endNode : endNodes) {
+                    if (nodeInside.getUniqueId() == endNode.getUniqueId()) {
+                        System.out.println("Node is inside polygon: " + endNode.getUniqueId());
+                        nodesOutside = false;
+                        break;
+                    }
+                }
+            }
+            if (!nodesOutside)
+                break;
+        }
+        return nodesOutside;
     }
 
     List<JoinedPolygon> buildMultipolygonAndGetRings(Relation relation) {
@@ -1120,17 +1149,25 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
     public Relation getCrossingRelation(List<Way> offsetWays) {
 
-        Set<Way> newIntersectedWays = new HashSet<>();
+        Set<Way> waysIntersectingWithOffsetWays = new HashSet<>();
         // Check ways that intersects with selected Way
         NodeWayUtils.addWaysIntersectingWays(getLayerManager().getActiveDataSet().getWays(), offsetWays,
-                newIntersectedWays);
+                waysIntersectingWithOffsetWays);
+
+        // Collect Nodes at ends for check
+        List<Node> endNodes = new ArrayList<>();
+        for (Way way : offsetWays) {
+            endNodes.add(way.firstNode());
+            endNodes.add(way.lastNode());
+        }
 
         // Check if intersected Way is part of Relation
-        Set<Relation> parentRelations = OsmPrimitive.getParentRelations(newIntersectedWays);
+        Set<Relation> parentRelations = OsmPrimitive.getParentRelations(waysIntersectingWithOffsetWays);
 
         for (Relation relation : parentRelations) {
-            // check if complete
-            if (relation.getIncompleteMembers().size() == 0 && "multipolygon".equals(relation.get("type"))) {
+            // check if complete and check if Relation is fully crossed
+            if (relation.getIncompleteMembers().size() == 0 && "multipolygon".equals(relation.get("type"))
+                    && checkIfNodesOutsideMultipolygon(relation, endNodes)) {
                 return relation;
             }
         }

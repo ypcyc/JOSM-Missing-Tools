@@ -92,8 +92,20 @@ public class PolygonUnlink extends JosmAction {
 
                         for (Way commonWayToUnglueFrom : commonWays) {
                             // Process glued ways that are unclosed Ways
+                            // Additional check for multipolygon
+
+                            boolean partOfMultipolygon = false;
+                            Set<Relation> parentRelations = OsmPrimitive
+                                    .getParentRelations(Collections.singleton(commonWayToUnglueFrom));
+                            for (Relation relation : parentRelations) {
+                                // check if complete and check if Relation is fully crossed
+                                if ("multipolygon".equals(relation.get("type"))) {
+                                    partOfMultipolygon = true;
+                                }
+                            }
+
                             if (commonWayToUnglueFrom.getUniqueId() != selectedWay.getUniqueId()
-                                    && !commonWayToUnglueFrom.isClosed()) {
+                                    && !commonWayToUnglueFrom.isClosed() && !partOfMultipolygon) {
 
                                 List<Node> nodesToUnglueFrom = commonWayToUnglueFrom.getNodes();
 
@@ -120,13 +132,13 @@ public class PolygonUnlink extends JosmAction {
                             Map<Node, Node> replaced = new HashMap<>();
                             commonNodes.forEach(n -> replaced.put(n, cloneNode(n, cmds)));
 
-                            List<Node> modNodes = new ArrayList<>(selectedWay.getNodes());
-                            modNodes.replaceAll(n -> replaced.getOrDefault(n, n));
+                            List<Node> aSelectedWayNodesToModify = new ArrayList<>(selectedWay.getNodes());
+                            aSelectedWayNodesToModify.replaceAll(n -> replaced.getOrDefault(n, n));
 
                             selectedNodes = new HashSet<>(commonNodes);
 
                             // only one changeCommand for a way, else garbage will happen
-                            addCheckedChangeNodesCmd(cmds, selectedWay, modNodes);
+                            addCheckedChangeNodesCmd(cmds, selectedWay, aSelectedWayNodesToModify);
                             UndoRedoHandler.getInstance().add(new SequenceCommand(
                                     trn("Dupe {0} node into {1} nodes", "Dupe {0} nodes into {1} nodes",
                                             commonNodes.size(), commonNodes.size(), 2 * commonNodes.size()),

@@ -37,6 +37,22 @@ tasks.named<Test>("test") {
     useJUnitPlatform()
 }
 
+tasks.runJosm {
+  jvmArgs(
+    "--add-exports=java.base/sun.security.action=ALL-UNNAMED",
+    "--add-exports=java.desktop/com.sun.imageio.plugins.jpeg=ALL-UNNAMED",
+    "--add-exports=java.desktop/com.sun.imageio.spi=ALL-UNNAMED"
+  )
+}
+
+tasks.debugJosm {
+  jvmArgs(
+    "--add-exports=java.base/sun.security.action=ALL-UNNAMED",
+    "--add-exports=java.desktop/com.sun.imageio.plugins.jpeg=ALL-UNNAMED",
+    "--add-exports=java.desktop/com.sun.imageio.spi=ALL-UNNAMED"
+  )
+}
+
 josm {
   pluginName = "josm_missingtools"
    debugPort = 3626 // choose a random port for your project (to avoid clashes with other projects)

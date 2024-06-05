@@ -21,7 +21,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
-import java.util.Iterator;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -131,7 +130,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
     private static final CachingProperty<Color> MAIN_COLOR = new NamedColorProperty(marktr("make parallel helper line"), Color.RED).cached();
 
     private static final CachingProperty<Map<Modifier, Boolean>> SNAP_MODIFIER_COMBO
-            = new KeyboardModifiersProperty(prefKey("snap-modifier-combo"),             "?sC").cached();
+            = new KeyboardModifiersProperty(prefKey("snap-modifier-combo"),             "?Sc").cached();
     private static final CachingProperty<Map<Modifier, Boolean>> COPY_TAGS_MODIFIER_COMBO
             = new KeyboardModifiersProperty(prefKey("copy-tags-modifier-combo"),        "As?").cached();
     private static final CachingProperty<Map<Modifier, Boolean>> ADD_TO_SELECTION_MODIFIER_COMBO
@@ -191,8 +190,9 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         super(tr("Polygon Cut"),
                 "polycut",
                 tr("Cut Polygon by parallel copies of ways"),
-                Shortcut.registerShortcut("mapmode:parallel", tr("Mode: {0}",
-                        tr("Polygon Cut")), KeyEvent.VK_Y, Shortcut.DIRECT),
+                Shortcut.registerShortcut("mapmode:cutmultipolygon",
+                        tr("Mode: {0}", tr("Polygon Cut")),
+                        KeyEvent.VK_X, Shortcut.SHIFT),
                 ImageProvider.getCursor("normal", "parallel"));
         // setHelpId(ht("/Action/Parallel"));
         mv = mapFrame.mapView;
@@ -355,7 +355,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
     // Cut logic
     void creteCutPath() {
 
-        if (ctrl) {
+        if (shift) {
 
             ds = getLayerManager().getActiveDataSet();
             Collection<Node> selectedNodes = ds.getSelectedNodes();
@@ -401,32 +401,28 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
     }
 
     private void performCut() {
-        if (ctrl && pWays != null) {
+        Logging.info("Cut started");
+
+        if (shift && pWays != null) {
 
             List<Way> offsetWays = new ArrayList<>();
             offsetWays.addAll(pWays.getWays());
             offsetWays.addAll(pWaysMirrored.getWays());
 
             // 1. find relation/polygon
-            // TODO check for correct relation
 
             Relation relation = getCrossingRelation(offsetWays);
             if (relation == null) {
                 Logging.info("Error: No crossing completed Relation can be found");
 
-                pWays = null;
-                pWaysMirrored = null;
+                revertOffsetWays(offsetWays);
 
-                Way refWay = referenceSegment.getWay();
-
-                offsetWays.add(refWay);
-
-                Command cmd = DeleteCommand.delete(offsetWays, true, false);
-                UndoRedoHandler.getInstance().add(cmd);
-
-                mv.removeTemporaryLayer(temporaryLayer);
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
                         "You are probably trying to cut incomplete polygon. Please check if all related relation members are downloaded");
+
+            } else if (!validateRelation(relation)) {
+
+                revertOffsetWays(offsetWays);
 
             } else {
 
@@ -509,6 +505,43 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
     }
 
+    private void revertOffsetWays(List<Way> offsetWays) {
+        pWays = null;
+        pWaysMirrored = null;
+
+        Way refWay = referenceSegment.getWay();
+
+        offsetWays.add(refWay);
+
+        Command cmd = DeleteCommand.delete(offsetWays, true, false);
+        UndoRedoHandler.getInstance().add(cmd);
+
+        mv.removeTemporaryLayer(temporaryLayer);
+    }
+
+    private boolean validateRelation(Relation relation) {
+
+        Collection<Way> relationMemberWays = new ArrayList<>(relation.getMemberPrimitives(Way.class));
+        MultipolygonBuilder multipolygon = new MultipolygonBuilder();
+
+        String error = multipolygon.makeFromWays(relationMemberWays);
+
+        if (error != null) {
+            JOptionPane.showMessageDialog(MainApplication.getMainFrame(), error);
+            return false;
+        }
+
+        if (multipolygon.outerWays.size() > 1) {
+            JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
+                    "Multiple outer rings found, please reconstruct multipolygon first using Reltoolbox 'Reconstruct polygon' feature");
+            return false;
+
+        }
+
+        return true;
+
+    }
+
     void reconstructRelation(Relation relation, List<Way> waysForDeletion) {
 
         Collection<OsmPrimitive> waysToDelete = new ArrayList<>();
@@ -529,6 +562,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
     }
 
     void createRelation(Relation r, Collection<Way> relationMemberWays) {
+        // reltoolbox ReconstructPolygonAction
         MultipolygonBuilder mpc = new MultipolygonBuilder();
         String error = mpc.makeFromWays(relationMemberWays);
 
@@ -541,58 +575,58 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         List<Command> commands = new ArrayList<>();
         List<OsmPrimitive> newSelection = new ArrayList<>();
 
-        for (JoinedPolygon p : mpc.outerWays) {
+        for (JoinedPolygon outerRing : mpc.outerWays) {
 
-            ArrayList<JoinedPolygon> myInnerWays = new ArrayList<>();
-            for (JoinedPolygon i : mpc.innerWays) {
+            ArrayList<JoinedPolygon> innerRingsOfOuter = new ArrayList<>();
+            for (JoinedPolygon innerRing : mpc.innerWays) {
                 // if the first point of any inner ring is contained in this
                 // outer ring, then this inner ring belongs to us. This
                 // assumption only works if multipolygons have valid geometries
-                EastNorth en = i.ways.get(0).firstNode().getEastNorth();
-                if (p.area.contains(en.east(), en.north())) {
-                    myInnerWays.add(i);
+                EastNorth en = innerRing.ways.get(0).firstNode().getEastNorth();
+                if (outerRing.area.contains(en.east(), en.north())) {
+                    innerRingsOfOuter.add(innerRing);
                 }
             }
 
-            if (!myInnerWays.isEmpty()) {
+            if (!innerRingsOfOuter.isEmpty()) {
                 // this ring has inner rings, so we leave a multipolygon in
                 // place and don't reconstruct the rings.
-                Relation n;
+                Relation newRelation;
                 if (relationReused) {
-                    n = new Relation();
-                    n.setKeys(r.getKeys());
+                    newRelation = new Relation();
+                    newRelation.setKeys(r.getKeys());
                 } else {
-                    n = new Relation(r);
-                    n.setMembers(null);
+                    newRelation = new Relation(r);
+                    newRelation.setMembers(null);
                 }
-                for (Way w : p.ways) {
-                    n.addMember(new RelationMember("outer", w));
+                for (Way outerRingWay : outerRing.ways) {
+                    newRelation.addMember(new RelationMember("outer", outerRingWay));
                 }
-                for (JoinedPolygon i : myInnerWays) {
-                    for (Way w : i.ways) {
-                        n.addMember(new RelationMember("inner", w));
+                for (JoinedPolygon innerRing : innerRingsOfOuter) {
+                    for (Way innerRingWay : innerRing.ways) {
+                        newRelation.addMember(new RelationMember("inner", innerRingWay));
                     }
                 }
                 if (relationReused) {
-                    commands.add(new AddCommand(ds, n));
+                    commands.add(new AddCommand(ds, newRelation));
                 } else {
                     relationReused = true;
-                    commands.add(new ChangeCommand(r, n));
+                    commands.add(new ChangeCommand(r, newRelation));
                 }
-                newSelection.add(n);
+                newSelection.add(newRelation);
                 continue;
             }
 
             // move all tags from relation and common tags from ways
             // start with all tags from first way but only if area tags are present
-            Map<String, String> tags = p.ways.get(0).getKeys();
-            if (!p.ways.get(0).hasAreaTags()) {
+            Map<String, String> tags = outerRing.ways.get(0).getKeys();
+            if (!outerRing.ways.get(0).hasAreaTags()) {
                 tags.clear();
             }
-            List<OsmPrimitive> relations = p.ways.get(0).getReferrers();
+            List<OsmPrimitive> relations = outerRing.ways.get(0).getReferrers();
             Set<String> noTags = new HashSet<>(r.keySet());
-            for (int i = 1; i < p.ways.size(); i++) {
-                Way w = p.ways.get(i);
+            for (int i = 1; i < outerRing.ways.size(); i++) {
+                Way w = outerRing.ways.get(i);
                 for (String key : w.keySet()) {
                     String value = w.get(key);
                     if (!noTags.contains(key) && tags.containsKey(key) && !tags.get(key).equals(value)) {
@@ -609,7 +643,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             // then delete ways that are not relevant (do not take part in other relations
             // or have strange tags)
             Way candidateWay = null;
-            for (Way w : p.ways) {
+            for (Way w : outerRing.ways) {
                 if (w.getReferrers().size() == 1) {
                     // check tags that remain
                     Set<String> keys = new HashSet<>(w.keySet());
@@ -633,7 +667,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
             // take the first way, put all nodes into it, making it a closed polygon
             Way result = candidateWay == null ? new Way() : new Way(candidateWay);
-            result.setNodes(p.nodes);
+            result.setNodes(outerRing.nodes);
             result.addNode(result.firstNode());
             result.setKeys(tags);
             newSelection.add(candidateWay == null ? result : candidateWay);
@@ -1211,7 +1245,6 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             MainApplication.getMap().statusLine.setDist(pWays.getWays());
         }
 
-        Logging.info("Cut started");
         performCut();
 
         setMode(Mode.NORMAL);
@@ -1417,7 +1450,11 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
             pWays.commit();
             pWaysMirrored = new ParallelWays(sourceWays, copyTags, referenceWayIndex);
             pWaysMirrored.commit();
-            getLayerManager().getEditDataSet().setSelected(pWays.getWays());
+
+            List<Way> offsetWays = pWays.getWays();
+            offsetWays.addAll(pWaysMirrored.getWays());
+
+            getLayerManager().getEditDataSet().setSelected(offsetWays);
             return true;
         } catch (IllegalArgumentException e) {
             Logging.debug(e);

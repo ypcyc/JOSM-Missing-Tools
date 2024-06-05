@@ -1,5 +1,12 @@
 {
   "java.compile.nullAnalysis.mode": "automatic",
   "java.configuration.updateBuildConfiguration": "interactive",
-  "cSpell.words": ["missingtools", "Multipolygon", "openstreetmap", "Waychunks"]
+  "cSpell.words": [
+    "marktr",
+    "missingtools",
+    "Multipolygon",
+    "openstreetmap",
+    "reltoolbox",
+    "Waychunks"
+  ]
 }

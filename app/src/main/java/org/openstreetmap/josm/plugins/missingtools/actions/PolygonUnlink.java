@@ -46,14 +46,15 @@ public class PolygonUnlink extends JosmAction {
     private transient Set<Node> selectedNodes;
 
     /**
-     * Constructs a new {@code RunMagic}.
+     * Constructs a new {@code PolygonUnlink}.
      */
     public PolygonUnlink() {
-        super(tr("Polygon Unlink"), "unglue", tr("Unlink polygon from ways"),
-                Shortcut.registerShortcut("tools:addintersect", tr("More tools: {0}", tr("Add nodes at intersections")),
-                        KeyEvent.VK_M, Shortcut.SHIFT),
+        super(tr("Polygon Unlink"), "unlink", tr("Unlink polygon from ways"),
+                Shortcut.registerShortcut("tools:polygonunlink",
+                        tr("More tools: {0}", tr("Polygon Unlink")),
+                        KeyEvent.VK_G, Shortcut.SHIFT),
                 true);
-        putValue("help", ht("/Action/AddIntersections"));
+        // putValue("help", ht("/Action/AddIntersections"));
     }
 
     @Override

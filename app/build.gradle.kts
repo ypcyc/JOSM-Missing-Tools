@@ -1,11 +1,17 @@
 plugins {
     id("org.openstreetmap.josm").version("0.8.2")
+    id("java")
+    //id("java-library")
 }
 
 repositories {
+  
     // Use Maven Central for resolving dependencies.
     mavenCentral()
+    
 }
+
+//configurations { create("externalLibs") }
 
 dependencies {
     // Use JUnit Jupiter for testing.
@@ -16,7 +22,11 @@ dependencies {
 
     //implementation("org.locationtech.jts:jts-core:1.19.0")
 
-    implementation("org.jgrapht:jgrapht-jdk1.5:0.7.3")
+    //implementation("org.jgrapht:jgrapht-jdk1.5:0.7.3")
+    packIntoJar("org.jgrapht:jgrapht-core:1.0.0")
+    
+    //implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
+    //implementation(files("/libs/jgrapht-core-1.0.0.jar"))
 }
 
 // application {

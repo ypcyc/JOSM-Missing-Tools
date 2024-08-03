@@ -333,7 +333,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
         updateFlagsOnlyChangeableOnPress();
         updateFlagsChangeableAlways();
 
-        creteCutPath();
+        createCutPath();
 
         // Since the created way is left selected, we need to unselect again here
         if (pWays != null && pWays.getWays() != null) {
@@ -352,8 +352,8 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
     }
 
-    // Cut logic
-    void creteCutPath() {
+    // Cut Action
+    void createCutPath() {
 
         if (shift) {
 
@@ -370,12 +370,12 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
             List<Node> selectedNodesList = new ArrayList<>(selectedNodes);
             RoutingGraph oRoutingGraph = new RoutingGraph();
-            List<OsmEdge> listedge = oRoutingGraph.applyAlgorithm(ds, selectedNodesList);
+            List<OsmEdge> osmEdgeList = oRoutingGraph.applyAlgorithm(ds, selectedNodesList);
 
             List<Node> routeNodes = new ArrayList<>();
             routeNodes.add(firstNode);
 
-            for (OsmEdge edge : listedge) {
+            for (OsmEdge edge : osmEdgeList) {
                 Node toNode = edge.getTo();
                 if (!routeNodes.contains(toNode)) {
                     routeNodes.add(toNode);
@@ -426,7 +426,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
             } else {
 
-                Logging.info("Relation found: " + relation.getUniqueId());
+                Logging.info("Valid Relation found: " + relation.getUniqueId());
 
                 ringTwoCrossingWays = new ArrayList<>();
                 intersectionNodes = new ArrayList<>();
@@ -497,7 +497,7 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
                 }
             }
 
-            // Switch mode
+            // Switch mode to SelectAction
             MapFrame map = MainApplication.getMap();
             map.selectMapMode(map.mapModeSelect);
 
@@ -767,8 +767,8 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
                 try {
                     Logging.info("Relation incomplete members: " + relation.getIncompleteMembers().size());
-                    Pair<List<Relation>, List<Command>> Pairs = SplitObjectAction.splitMultipolygonAtWay(relation,
-                            wayForSplit, true);
+                    // Pair<List<Relation>, List<Command>> Pairs =
+                    SplitObjectAction.splitMultipolygonAtWay(relation, wayForSplit, true);
                     Logging.info("Split successful");
 
                 } catch (IllegalArgumentException err) {
@@ -795,11 +795,10 @@ public class PolygonCutAction extends MapMode implements ModifierExListener {
 
         // 1 check if selected way crosses inner polygon
         Set<Way> intersectedWaysWithOffsetLine = new HashSet<>();
-        // Check ways that intersects with selected Way
-        // boolean crossingInner = false;
         Way ringOneCrossingWay = null;
         Way ringTwoCrossingWay = null;
 
+        // Check ways that intersects with selected Way
         NodeWayUtils.addWaysIntersectingWays(getLayerManager().getActiveDataSet().getWays(),
                 Collections.singletonList(offsetWay), intersectedWaysWithOffsetLine);
 

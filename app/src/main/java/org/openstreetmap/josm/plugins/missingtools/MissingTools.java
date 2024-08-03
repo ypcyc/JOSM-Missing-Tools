@@ -10,6 +10,7 @@ import org.openstreetmap.josm.plugins.Plugin;
 import org.openstreetmap.josm.plugins.PluginInformation;
 import org.openstreetmap.josm.plugins.missingtools.actions.PolygonCutAction;
 import org.openstreetmap.josm.plugins.missingtools.actions.PolygonUnlink;
+import org.openstreetmap.josm.plugins.missingtools.actions.PolygonUnlinkAction;
 
 public class MissingTools extends Plugin {
     /**
@@ -35,6 +36,8 @@ public class MissingTools extends Plugin {
         if (oldFrame == null && newFrame != null) { // map frame added
             MapFrame map = MainApplication.getMap();
             map.addMapMode(new IconToggleButton(new PolygonCutAction(map)));
+
+            map.addMapMode(new IconToggleButton(new PolygonUnlinkAction(map)));
         }
     }
 }

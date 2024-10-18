@@ -63,7 +63,7 @@ tasks.compileJava_testedJosm{
 josm {
   pluginName = "josm_missingtools"
    debugPort = 3626 // choose a random port for your project (to avoid clashes with other projects)
-  josmCompileVersion = "19094"
+  josmCompileVersion = "19230"
   manifest {
     description = "Missing Tools for Working with Polygons"
     mainClass = "org.openstreetmap.josm.plugins.missingtools.MissingTools"

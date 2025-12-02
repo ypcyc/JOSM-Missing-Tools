@@ -4,29 +4,23 @@ plugins {
 }
 
 repositories {
-    // Use Maven Central for resolving dependencies.
     mavenCentral()
 }
 
 dependencies {
-    // Use JUnit Jupiter for testing.
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
-
-    // This dependency is used by the application.
     implementation("com.google.guava:guava:31.1-jre")
-
     //implementation("org.locationtech.jts:jts-core:1.19.0")
-
     //implementation("org.jgrapht:jgrapht-jdk1.5:0.7.3")
     packIntoJar("org.jgrapht:jgrapht-core:1.0.0")
     
 
 }
 
-tasks.named<Test>("test") {
-    // Use JUnit Platform for unit tests.
-    useJUnitPlatform()
-}
+// tasks.named<Test>("test") {
+//     // Use JUnit Platform for unit tests.
+//     useJUnitPlatform()
+// }
 
 tasks.runJosm {
   jvmArgs(
@@ -54,10 +48,14 @@ josm {
   debugPort = 3626
   josmCompileVersion = "19439"
   manifest {
-    description = "Missing Tools for Working with Polygons"
+    author = "Maratkuls Kosojevs"
+    description = "Some Missing Tools for Working with Polygons and Polygon Relations. 1. Cuts Multipolygons by creating parallel offset from way connecting 2 nodes outside Multipolygon.2. Unglue Polygons from ways."
+    iconPath = "images/mapmode/CutPolygon.svg"
     mainClass = "org.openstreetmap.josm.plugins.missingtools.MissingTools"
     minJosmVersion = "19017"
-    author = "Maratkuls Kosojevs"
+    canLoadAtRuntime = true
+    pluginDependencies.add("utilsplugin2")
+    minJavaVersion = 11
   }
 }
 

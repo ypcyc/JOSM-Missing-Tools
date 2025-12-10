@@ -749,8 +749,8 @@ public class CutPolygonAction extends MapMode implements ModifierExListener {
     }
 
     private static class SplitObjectCommand extends SequenceCommand {
-        SplitObjectCommand(String name, Collection<Command> sequenz) {
-            super(tr(name), sequenz, true);
+        SplitObjectCommand(String name, Collection<Command> commandSequence) {
+            super(tr(name), commandSequence, true);
             setSequenceComplete(true);
         }
     }

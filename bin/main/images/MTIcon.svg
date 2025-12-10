@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="320"
+   height="320.00003"
+   viewBox="0 0 84.666667 84.666675"
+   version="1.1"
+   id="svg13815"
+   inkscape:version="1.2 (dc2aedaf03, 2022-05-15)"
+   sodipodi:docname="mt_icon2.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview13817"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:zoom="0.72515432"
+     inkscape:cx="386.12471"
+     inkscape:cy="59.987231"
+     inkscape:window-width="1920"
+     inkscape:window-height="1001"
+     inkscape:window-x="-9"
+     inkscape:window-y="-9"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs13812" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-51.072075,-106.3491)">
+    <rect
+       style="fill:#c8102e;fill-opacity:1;stroke:none;stroke-width:34.7783;stroke-dasharray:1.04335, 0.347783;stroke-dashoffset:1.18246"
+       id="rect5746"
+       width="84.666664"
+       height="84.666664"
+       x="51.072075"
+       y="106.3491" />
+    <path
+       id="rect7928"
+       style="fill:#ffffff;stroke-width:34.5106;stroke-dasharray:1.03532, 0.345106;stroke-dashoffset:1.17335"
+       d="M 51.072075 127.51577 L 51.072075 191.01577 L 80.176242 191.01577 L 80.176242 148.09539 L 83.918132 151.83728 L 93.405408 162.12709 L 103.69522 151.83728 L 106.63457 148.71964 L 106.63457 191.01577 L 135.73874 191.01577 L 135.73874 127.51577 L 106.63457 127.51577 L 93.405408 141.54747 L 80.176242 127.51577 L 51.072075 127.51577 z " />
+  </g>
+</svg>

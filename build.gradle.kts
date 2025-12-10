@@ -49,8 +49,8 @@ josm {
   josmCompileVersion = "19439"
   manifest {
     author = "Maratkuls Kosojevs"
-    description = "Some Missing Tools for Working with Polygons and Polygon Relations. 1. Cuts Multipolygons by creating parallel offset from way connecting 2 nodes outside Multipolygon.2. Unglue Polygons from ways."
-    iconPath = "images/mapmode/CutPolygon.svg"
+    description = "Some Missing Tools for Working with Polygons and Multipolygons Relations. 1. Cuts Multipolygons by creating parallel offset from way connecting 2 nodes outside Multipolygon.2. Unglue Polygons from ways."
+    iconPath = "images/MTIcon.svg"
     mainClass = "org.openstreetmap.josm.plugins.missingtools.MissingTools"
     minJosmVersion = "19017"
     canLoadAtRuntime = true

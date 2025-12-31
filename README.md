@@ -13,12 +13,14 @@ Cuts a multipolygon using a cutting line automatically computed from the user’
 
 #### How to use:
 
-1. Select **two nodes outside** the multipolygon you want to cut.
-2. Press **Shift + X**.
-3. The plugin finds a **valid route** between those two nodes using surrounding ways (highways, waterways or power lines can be used).
-4. That route becomes the **cutting line**.
-5. The multipolygon is then **split into two valid multipolygons**.
-6. Resulting relations are **rebuilt and cleaned up** to remain valid.
+1. Select **two nodes outside** the multipolygon you want to cut (for example highways, waterways or power lines can be used).
+2. Press and **keep holding** **Shift + X**.
+3. **Click Left mouse button and keep it pressed** and start moving cursor away from center of imaginary cutting line.
+4. The plugin finds a **valid route** between those two nodes using surrounding ways.
+5. That found route becomes the **cutting line**. You can see projected cutting lines that you can move with mouse.
+6. Release **Left mouse button** and later also **Shift + X**
+7. The multipolygon is then **split into two valid multipolygons**.
+8. Resulting relations are **rebuilt and cleaned up** to remain valid.
 
 #### Technical details:
 
